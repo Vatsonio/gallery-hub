@@ -1,0 +1,16 @@
+  Інфраструктура:
+  - Власний Proxmox кластер (без публічного IP)
+  - Portainer для керування контейнерами
+  - Cloudflare Tunnel для зовнішнього доступу
+
+  Деплой пайплайн:
+  GitHub → GitHub Actions (build + push Docker image) → Portainer pull → запуск стеку
+
+
+personal-hub: (divass.space)
+  Сервіси в стеку (docker-compose):
+  - Next.js app (сам personal-hub)
+  - PostgreSQL 16 (через postgres.js, без ORM)
+  - MinIO (S3-сумісний storage)
+  - Resend (email)
+  - one-shot migrate сервіс для міграцій
