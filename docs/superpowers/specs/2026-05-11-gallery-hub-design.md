@@ -87,9 +87,9 @@ Returns a ZIP. The ZIP is generated and cached in MinIO under `exports/{share_to
 | Concern | Choice | Notes |
 |---|---|---|
 | Framework | Next.js 15 (App Router) | Same as `personal-hub`. Server actions for mutations. |
-| Database | Postgres 16 | Same instance as `personal-hub` or separate — TBD during deploy. |
+| Database | Postgres 16 | **Own instance.** `gallery-hub` is a fully isolated stack — no shared Postgres with `personal-hub`. |
 | DB driver | `postgres.js` | No ORM, raw SQL. Matches `personal-hub`. |
-| Object storage | MinIO | Existing instance, new bucket `gallery`. |
+| Object storage | MinIO | **Own instance.** Own MinIO container inside the gallery-hub stack. |
 | Image processing | `sharp` | Resize to thumb/web/large. |
 | Auth (admin) | `iron-session` | Cookie-based, single admin user. |
 | ZIP export | `archiver` | Streamed, writes to MinIO cache. |
@@ -239,17 +239,100 @@ gallery-hub/
 
 ---
 
-## 5. Deployment
+## 5. Deployment — fully isolated stack
 
-- GitHub Actions builds Docker image on push to `main`, pushes to registry.
-- Portainer stack pulls latest image, runs `docker-compose up`.
-- Compose services: `gallery-app` (Next.js), `gallery-migrate` (one-shot), reuses existing `postgres` and `minio` services (shared with personal-hub).
-- Cloudflare Tunnel: add hostname `gallery.divass.space` → `gallery-app:3000`.
-- Secrets: `DATABASE_URL`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `SESSION_PASSWORD` (iron-session), `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` (for initial seed), `RESEND_API_KEY` (optional).
+`gallery-hub` is deployed as its own Portainer stack — independent from `personal-hub`. Own Postgres, own MinIO, own everything. Deploys to gallery-hub never touch personal-hub and vice versa.
+
+**Compose services (`docker-compose.yml`):**
+
+- `gallery-app` — Next.js application (built from this repo).
+- `gallery-postgres` — Postgres 16 with named volume `gallery_pgdata`.
+- `gallery-minio` — MinIO with named volume `gallery_miniodata`. Console exposed only on internal network.
+- `gallery-migrate` — one-shot service that runs SQL migrations against `gallery-postgres` then exits. Depends on `gallery-postgres` being healthy.
+- `gallery-worker` — pg-boss worker container running derivative generation. Separate from `gallery-app` so heavy `sharp` jobs don't compete with HTTP requests.
+
+**CI/CD pipeline:**
+
+- GitHub Actions on push to `main`: build Docker image for `gallery-app` and `gallery-worker`, push to registry.
+- Portainer webhook re-pulls and restarts the gallery-hub stack.
+
+**Cloudflare Tunnel:** add hostname `gallery.divass.space` → `gallery-app:3000`. Existing `personal-hub` tunnel route stays untouched.
+
+**Secrets (Portainer env):**
+
+```
+DATABASE_URL=postgresql://gallery:***@gallery-postgres:5432/gallery_hub
+MINIO_ENDPOINT=http://gallery-minio:9000
+MINIO_ACCESS_KEY=...
+MINIO_SECRET_KEY=...
+MINIO_BUCKET=gallery
+SESSION_PASSWORD=...                       # iron-session, 32+ chars
+ADMIN_EMAIL=admin@divass.space
+ADMIN_PASSWORD_HASH=...                    # argon2, generated once
+WIDGET_TOKEN=...                           # shared with personal-hub, see Section 6
+RESEND_API_KEY=...                         # optional
+PUBLIC_BASE_URL=https://gallery.divass.space
+```
 
 ---
 
-## 6. Acceptance criteria (MVP)
+## 6. Integration: personal-hub widget
+
+`personal-hub` (at `divass.space`) gets a small widget showing recent gallery activity. The two apps communicate via a single read-only HTTP endpoint over the public URL (Cloudflare Tunnel handles routing). No direct DB or Docker network coupling — that's the price of full stack isolation, and we accept it.
+
+### Endpoint exposed by gallery-hub
+
+```
+GET https://gallery.divass.space/api/widget/summary
+Authorization: Bearer ${WIDGET_TOKEN}
+
+→ 200 OK
+{
+  "stats": {
+    "albums_total": 14,
+    "albums_published": 8,
+    "photos_total": 612,
+    "storage_bytes": 3_640_000_000
+  },
+  "recent_albums": [
+    {
+      "title": "Anna & Oleh",
+      "subtitle": "Wedding · Oct 2026",
+      "cover_url": "https://gallery.divass.space/img/thumb/...",
+      "photo_count": 42,
+      "favorite_count": 12,
+      "view_count": 38,
+      "share_url": "https://gallery.divass.space/a/Hk7eRq8x",
+      "status": "published",
+      "updated_at": "2026-05-09T..."
+    },
+    ...
+  ],
+  "recent_selections": [
+    {
+      "album_title": "Anna & Oleh",
+      "added_count": 3,
+      "viewer_id_short": "a4f...",
+      "at": "2026-05-10T..."
+    }
+  ]
+}
+```
+
+- Returns up to 5 recent albums + 5 recent selection events.
+- Cover URLs are short-lived presigned MinIO URLs (1h TTL) — widget should re-fetch every ~30min, not cache forever.
+- Auth: bearer token via `WIDGET_TOKEN` env var. Same token is set in `personal-hub` env. No user session, no admin login.
+- Rate-limited to a few requests per minute (the widget refresh cadence).
+
+### Widget on personal-hub side
+
+A Next.js server component on personal-hub fetches this endpoint (server-side, with the token in env), revalidates every 5min via `next: { revalidate: 300 }`, and renders the dark-cinematic Gallery panel — title, top-3 recent album cards, total stats, "Open gallery →" link to `gallery.divass.space/admin`. Visual style matches the gallery-hub aesthetic (same rose accent, Inter, Lucide icons).
+
+If the endpoint is unreachable (gallery-hub down), widget shows a graceful empty state — "Gallery offline" with retry — and personal-hub keeps working.
+
+---
+
+## 7. Acceptance criteria (MVP)
 
 - [ ] Admin can log in at `/admin/login`.
 - [ ] Admin can create an album, set title/subtitle, mark draft/published.
@@ -269,7 +352,7 @@ gallery-hub/
 
 ---
 
-## 7. Open questions / deferred
+## 8. Open questions / deferred
 
 These are intentionally not decided yet — defaults proposed, can be revisited during planning:
 
@@ -282,7 +365,7 @@ These are intentionally not decided yet — defaults proposed, can be revisited 
 
 ---
 
-## 8. Status & next step
+## 9. Status & next step
 
 Brainstorm complete. Ready for implementation planning.
 
