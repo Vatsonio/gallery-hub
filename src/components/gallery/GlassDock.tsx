@@ -41,13 +41,7 @@ export default function GlassDock({
       type="button"
       onClick={onClick}
       data-dock-variant={variant}
-      className="glass-dock fixed left-1/2 -translate-x-1/2 z-30 flex w-[min(92vw,480px)] items-center gap-3 rounded-2xl px-4 py-3 text-left cursor-pointer hover:bg-white/[0.04] transition glass-dock-anim"
-      style={{
-        // Above mobile tabbar (which sits at safe-area-inset-bottom), tucked
-        // close to bottom on desktop.
-        bottom:
-          "calc(env(safe-area-inset-bottom, 0px) + 5.5rem)",
-      }}
+      className="glass-dock fixed left-1/2 -translate-x-1/2 z-40 flex w-[min(92vw,480px)] items-center gap-3 rounded-2xl px-4 py-3 text-left cursor-pointer hover:bg-white/[0.04] transition glass-dock-anim sm:bottom-[1.5rem] bottom-[max(0.5rem,env(safe-area-inset-bottom))]"
     >
       <span
         className={`grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br shrink-0 ${accent}`}

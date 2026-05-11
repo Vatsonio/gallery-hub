@@ -9,6 +9,12 @@ interface Props {
   token: string;
   /** Number of favorites for the current viewer (used as a badge). */
   favoritesCount?: number;
+  /**
+   * When a GlassDock is mounted under this tab bar on mobile, the tab bar
+   * lifts up so the dock can sit flush against the safe-area-inset-bottom.
+   * Approximate height of the dock (icon + label + paddings) ~ 4.5rem.
+   */
+  liftForDock?: boolean;
 }
 
 /**
@@ -16,16 +22,18 @@ interface Props {
  * tabs as glass pills, safe-area-inset-bottom aware. Hidden on sm+
  * because the desktop layout uses the inline header for navigation.
  */
-export default function MobileTabBar({ token, favoritesCount = 0 }: Props) {
+export default function MobileTabBar({ token, favoritesCount = 0, liftForDock = false }: Props) {
   const pathname = usePathname();
   const isAll = pathname === `/a/${token}`;
   const isFav = pathname === `/a/${token}/favorites`;
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 sm:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 sm:hidden"
       style={{
-        paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
+        paddingBottom: liftForDock
+          ? "calc(max(0.5rem, env(safe-area-inset-bottom)) + 5rem)"
+          : "max(0.75rem, env(safe-area-inset-bottom))",
       }}
       aria-label="Gallery sections"
     >

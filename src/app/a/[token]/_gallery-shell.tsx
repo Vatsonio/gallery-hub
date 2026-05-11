@@ -137,7 +137,11 @@ export default function GalleryShell({
           }}
         />
       )}
-      <MobileTabBar token={token} favoritesCount={favoritesCount} />
+      <MobileTabBar
+        token={token}
+        favoritesCount={favoritesCount}
+        liftForDock={showFavoritesDock || showSaveAllDock}
+      />
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
