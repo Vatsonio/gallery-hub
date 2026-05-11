@@ -1,0 +1,114 @@
+"use server";
+
+import { cookies } from "next/headers";
+import {
+  resolveShareLinkStatus,
+  unlockCookieName,
+  signUnlockValue,
+  loadShareLink,
+  UNLOCK_TTL_SECONDS,
+} from "@/lib/share";
+import { verifyPassword } from "@/lib/passwords";
+import { toggleFavoriteForViewer } from "@/lib/favorites";
+import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
+import { requireAdminSessionFromCookies } from "@/lib/session";
+import { randomUUID } from "node:crypto";
+
+export interface ToggleFavoriteResult {
+  favorited: boolean;
+}
+
+export interface UnlockResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function isAdminPreview(): Promise<boolean> {
+  const r = await requireAdminSessionFromCookies().catch(() => ({
+    ok: false as const,
+  }));
+  return r.ok;
+}
+
+/**
+ * Toggle a favorite for the current viewer. Cookie is created lazily
+ * if absent. Returns the *new* favorited state for the client to
+ * commit its optimistic UI against (or roll back on error).
+ *
+ * We deliberately do NOT revalidatePath here — the page snapshot does
+ * not need to be refetched server-side just to flip a heart icon. The
+ * client toggles optimistically and trusts the boolean we return.
+ */
+export async function toggleFavorite(
+  token: string,
+  photoId: string,
+): Promise<ToggleFavoriteResult> {
+  const jar = await cookies();
+  const unlocked = jar.get(unlockCookieName(token))?.value ?? null;
+  const status = await resolveShareLinkStatus(token, unlocked);
+  if (status.kind !== "ok") {
+    throw new Error(`share link not accessible: ${status.kind}`);
+  }
+
+  const adminPreview = await isAdminPreview();
+  if (adminPreview) {
+    // Admin preview: never persist viewer state. Return current persisted
+    // favourited state for the admin-preview viewer if any (it stays empty
+    // because we don't write).
+    return { favorited: false };
+  }
+
+  // Inline cookie issuance (resolveViewerId helper uses a sync jar shape
+  // that doesn't line up cleanly with the next/headers cookie store
+  // typing, so we replicate its logic explicitly here).
+  let viewerId = jar.get(VIEWER_COOKIE)?.value ?? null;
+  if (!viewerId) {
+    viewerId = randomUUID();
+    jar.set(VIEWER_COOKIE, viewerId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: `/a/${token}`,
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  }
+
+  if (viewerId === ADMIN_PREVIEW_VIEWER_ID) {
+    return { favorited: false };
+  }
+
+  const res = await toggleFavoriteForViewer(token, photoId, viewerId);
+  return { favorited: res.state === "added" };
+}
+
+/**
+ * Verify the share link password, set the signed unlock cookie on
+ * success. Used by the password gate page; returns plain JSON so the
+ * page can render an inline error without a redirect dance.
+ */
+export async function unlockShareLink(
+  token: string,
+  formData: FormData,
+): Promise<UnlockResult> {
+  const password = String(formData.get("password") ?? "");
+  if (!password) return { ok: false, error: "Enter a password." };
+
+  const link = await loadShareLink(token);
+  if (!link) return { ok: false, error: "Link not found." };
+  if (!link.password_hash) {
+    // Already public — nothing to unlock; just succeed.
+    return { ok: true };
+  }
+  const ok = await verifyPassword(link.password_hash, password);
+  if (!ok) return { ok: false, error: "Incorrect password." };
+
+  const jar = await cookies();
+  jar.set(unlockCookieName(token), signUnlockValue(token, Date.now()), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: `/a/${token}`,
+    maxAge: UNLOCK_TTL_SECONDS,
+  });
+  return { ok: true };
+}
