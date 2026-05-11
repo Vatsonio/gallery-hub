@@ -14,7 +14,14 @@ function makeClient(): S3Client {
     credentials: {
       accessKeyId: process.env.MINIO_ACCESS_KEY ?? "",
       secretAccessKey: process.env.MINIO_SECRET_KEY ?? ""
-    }
+    },
+    // AWS SDK v3 defaults to "WHEN_SUPPORTED" which injects a precomputed
+    // x-amz-checksum-crc32 query param into presigned PUT URLs. Browsers
+    // can't recompute that checksum against the file body, so MinIO rejects
+    // the upload. Tell the SDK to only add checksums when the API requires it
+    // (it never does for plain PutObject).
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED"
   });
 }
 
