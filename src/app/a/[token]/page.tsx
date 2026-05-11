@@ -99,10 +99,24 @@ export default async function PublicGalleryPage({ params }: Props) {
 
   const photoMap = new Map(decorated.map((p) => [p.id, p]));
 
-  await sql`
-    INSERT INTO view_events (share_token, viewer_id, event_type)
-    VALUES (${token}, ${viewerId}, 'page_view')
-  `.catch(() => undefined);
+  // Page-view dedupe: skip the insert if the same viewer recorded a
+  // page_view in the last 30 minutes. Prevents F5 / lightbox-close
+  // re-renders from inflating admin view counts. Admin previews never
+  // log here because viewerId === ADMIN_PREVIEW_VIEWER_ID; we still
+  // guard explicitly so an accidental sentinel write is a no-op.
+  if (viewerId !== ADMIN_PREVIEW_VIEWER_ID) {
+    await sql`
+      INSERT INTO view_events (share_token, viewer_id, event_type)
+      SELECT ${token}, ${viewerId}, 'page_view'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM view_events
+          WHERE share_token = ${token}
+            AND viewer_id = ${viewerId}
+            AND event_type = 'page_view'
+            AND created_at > NOW() - INTERVAL '30 minutes'
+       )
+    `.catch(() => undefined);
+  }
 
   const exportSizes = await computeExportSizes(token, viewerId, album.id);
 
