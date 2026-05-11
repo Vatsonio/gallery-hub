@@ -59,3 +59,9 @@ export async function requireAdminSession(req: Request): Promise<AdminAuthResult
   if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
   return { ok: false };
 }
+
+export async function requireAdminSessionFromCookies(): Promise<AdminAuthResult> {
+  const session = await getAdminSession();
+  if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
+  return { ok: false };
+}
