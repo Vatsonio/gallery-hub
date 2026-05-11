@@ -18,6 +18,25 @@ const minioOrigins = [
   originOf(process.env.MINIO_ENDPOINT)
 ].filter(Boolean);
 
+// Build next/image remotePatterns dynamically from the MinIO endpoints so the
+// gallery still works if someone switches to next/image down the line.
+function patternFromOrigin(value) {
+  const o = originOf(value);
+  if (!o) return null;
+  const u = new URL(o);
+  return {
+    protocol: u.protocol.replace(":", ""),
+    hostname: u.hostname,
+    port: u.port || undefined,
+    pathname: "/**"
+  };
+}
+
+const dynamicMinioPatterns = [
+  patternFromOrigin(process.env.MINIO_PUBLIC_ENDPOINT),
+  patternFromOrigin(process.env.MINIO_ENDPOINT)
+].filter(Boolean);
+
 const cspHeader = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -39,7 +58,8 @@ const nextConfig = {
     remotePatterns: [
       { protocol: "http", hostname: "gallery-minio" },
       { protocol: "http", hostname: "localhost" },
-      { protocol: "https", hostname: "gallery.divass.space" }
+      { protocol: "https", hostname: "gallery.divass.space" },
+      ...dynamicMinioPatterns
     ]
   },
   async headers() {
