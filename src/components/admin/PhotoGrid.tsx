@@ -19,9 +19,19 @@ interface ApiResp {
   photos: PhotoWithThumb[];
 }
 
-export function PhotoGrid({ slug }: { slug: string }) {
+export function PhotoGrid({
+  slug,
+  refreshKey = 0,
+  onPendingResolved,
+}: {
+  slug: string;
+  refreshKey?: number;
+  /** Called once when the last pending photo transitions to ready. */
+  onPendingResolved?: () => void;
+}) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [order, setOrder] = useState<string[]>([]);
+  const [hadPending, setHadPending] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -36,15 +46,23 @@ export function PhotoGrid({ slug }: { slug: string }) {
     setOrder(j.photos.map((p) => p.id));
   }
 
-  useEffect(() => { reload(); }, [slug]);
+  useEffect(() => { reload(); }, [slug, refreshKey]);
 
   useEffect(() => {
     if (!data) return;
     const anyProcessing = data.photos.some((p) => p.status !== "ready");
-    if (!anyProcessing) return;
-    const t = setInterval(reload, 2000);
-    return () => clearInterval(t);
-  }, [data, slug]);
+    if (anyProcessing) {
+      if (!hadPending) setHadPending(true);
+      const t = setInterval(reload, 2000);
+      return () => clearInterval(t);
+    }
+    // Transition from pending → all ready: tell the host to refresh
+    // any server-rendered surfaces (stats, badges) once.
+    if (hadPending) {
+      setHadPending(false);
+      onPendingResolved?.();
+    }
+  }, [data, slug, hadPending, onPendingResolved]);
 
   async function onDragEnd(e: DragEndEvent) {
     if (!data || !e.over || e.active.id === e.over.id) return;

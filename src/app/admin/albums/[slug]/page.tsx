@@ -1,8 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
 import { StatsStrip } from "@/components/admin/StatsStrip";
-import { Dropzone } from "@/components/admin/Dropzone";
-import { PhotoGrid } from "@/components/admin/PhotoGrid";
+import AlbumUploadAndGrid from "@/components/admin/AlbumUploadAndGrid";
 import { AlbumForm } from "@/components/admin/AlbumForm";
 import { Badge } from "@/components/ui/badge";
 import { ShareLinkCard } from "@/components/admin/ShareLinkCard";
@@ -69,15 +68,7 @@ export default async function AlbumDetailPage({ params }: Props) {
 
       <StatsStrip photos={photos.length} views={link?.viewCount ?? 0} favorites={link?.favoriteCount ?? 0} downloads={0} />
 
-      <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Upload</h2>
-        <Dropzone albumId={album.id} />
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Photos</h2>
-        <PhotoGrid slug={album.slug} />
-      </section>
+      <AlbumUploadAndGrid albumId={album.id} slug={album.slug} />
 
       <section className="border-t border-white/5 pt-8">
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Settings</h2>
