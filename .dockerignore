@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+coverage
+.vitest
+tests
+*.md
+.env
+.env.*
+docs
