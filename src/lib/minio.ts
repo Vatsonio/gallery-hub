@@ -4,38 +4,55 @@ import {
   CreateBucketCommand
 } from "@aws-sdk/client-s3";
 
-const globalForS3 = globalThis as unknown as { __s3?: S3Client };
+const globalForS3 = globalThis as unknown as { __s3?: S3Client; __s3Public?: S3Client };
 
-function makeClient(): S3Client {
+function makeClient(endpoint: string): S3Client {
   return new S3Client({
-    endpoint: process.env.MINIO_ENDPOINT ?? "http://localhost:9000",
+    endpoint,
     region: process.env.MINIO_REGION ?? "us-east-1",
     forcePathStyle: (process.env.MINIO_FORCE_PATH_STYLE ?? "true") !== "false",
     credentials: {
       accessKeyId: process.env.MINIO_ACCESS_KEY ?? "",
       secretAccessKey: process.env.MINIO_SECRET_KEY ?? ""
     },
-    // AWS SDK v3 defaults to "WHEN_SUPPORTED" which injects a precomputed
-    // x-amz-checksum-crc32 query param into presigned PUT URLs. Browsers
-    // can't recompute that checksum against the file body, so MinIO rejects
-    // the upload. Tell the SDK to only add checksums when the API requires it
-    // (it never does for plain PutObject).
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED"
   });
 }
 
+function internalEndpoint(): string {
+  return process.env.MINIO_ENDPOINT ?? "http://localhost:9000";
+}
+
+function publicEndpoint(): string {
+  return process.env.MINIO_PUBLIC_ENDPOINT ?? internalEndpoint();
+}
+
 function getClient(): S3Client {
-  if (!globalForS3.__s3) globalForS3.__s3 = makeClient();
+  if (!globalForS3.__s3) globalForS3.__s3 = makeClient(internalEndpoint());
   return globalForS3.__s3;
 }
 
-// Lazy proxy: defers `makeClient()` until first call/property access so that
-// vitest can spin up its MinIO testcontainer in `beforeAll` and have
-// MINIO_ENDPOINT/credentials ready by the time any test issues a real request.
+function getPublicClient(): S3Client {
+  if (!globalForS3.__s3Public) globalForS3.__s3Public = makeClient(publicEndpoint());
+  return globalForS3.__s3Public;
+}
+
+// Lazy proxy: defers makeClient() until first call/property access so vitest
+// can spin up its MinIO testcontainer in beforeAll and have env vars set in
+// time. The default client uses the *internal* endpoint (e.g. gallery-minio:9000
+// inside Docker) for server-side reads/writes.
 export const s3Client: S3Client = new Proxy({} as S3Client, {
   get(_t, prop, receiver) {
     return Reflect.get(getClient() as unknown as object, prop, receiver);
+  }
+});
+
+// Client whose signed URLs use MINIO_PUBLIC_ENDPOINT — what the browser sees.
+// Falls back to the internal endpoint if no public one is configured (dev).
+export const s3SignerClient: S3Client = new Proxy({} as S3Client, {
+  get(_t, prop, receiver) {
+    return Reflect.get(getPublicClient() as unknown as object, prop, receiver);
   }
 });
 

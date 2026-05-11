@@ -23,6 +23,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Allow browser PUT/GET from the gallery app's public origin.
+      # Set to ${PUBLIC_BASE_URL} (single origin) or '*' if it's behind multiple hostnames.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-${PUBLIC_BASE_URL}}
     volumes:
       - gallery_miniodata:/data
     healthcheck:
@@ -52,6 +55,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
