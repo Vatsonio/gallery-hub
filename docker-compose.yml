@@ -1,0 +1,88 @@
+services:
+  gallery-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gallery}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-gallery_hub}
+    volumes:
+      - gallery_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gallery} -d ${POSTGRES_DB:-gallery_hub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  gallery-minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - gallery_miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  gallery-migrate:
+    image: ghcr.io/divass/gallery-hub:latest
+    restart: "no"
+    command: ["npx", "tsx", "scripts/migrate.ts"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  gallery-app:
+    image: ghcr.io/divass/gallery-hub:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
+      MINIO_FORCE_PATH_STYLE: "true"
+      SESSION_PASSWORD: ${SESSION_PASSWORD}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+    ports:
+      - "3000:3000"
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+      gallery-minio:
+        condition: service_healthy
+      gallery-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - internal
+
+volumes:
+  gallery_pgdata:
+  gallery_miniodata:
+
+networks:
+  internal:
+    driver: bridge
