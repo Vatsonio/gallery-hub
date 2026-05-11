@@ -106,6 +106,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --- Worker (separate window) ---------------------------------------------
+echo [worker] launching derivatives worker in a new window ...
+start "gallery-worker" cmd /k "set DATABASE_URL=%DATABASE_URL%&& set MINIO_ENDPOINT=%MINIO_ENDPOINT%&& set MINIO_ACCESS_KEY=%MINIO_ACCESS_KEY%&& set MINIO_SECRET_KEY=%MINIO_SECRET_KEY%&& set MINIO_BUCKET=%MINIO_BUCKET%&& set MINIO_FORCE_PATH_STYLE=true&& set NODE_ENV=development&& npm run worker"
+
 echo.
 echo ============================================================
 echo   READY
@@ -116,6 +120,9 @@ echo.
 echo   MinIO console http://localhost:%MINIO_CONSOLE_PORT%
 echo                 minio / minio12345
 echo   Postgres      postgresql://gallery:gallery@localhost:%DB_PORT%/gallery_hub
+echo.
+echo   Worker        running in a separate cmd window
+echo                 (close that window to stop it; Ctrl+C here stops dev only)
 echo.
 echo   Stop dev:    Ctrl+C
 echo   Tear down:   dev-stop.bat   (keeps data)  /  dev-reset.bat (wipes)
