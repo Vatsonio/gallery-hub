@@ -13,7 +13,7 @@ export async function middleware(req: NextRequest) {
   if (!shouldProtect(pathname)) return NextResponse.next();
 
   const res = NextResponse.next();
-  const session = await getIronSession<AdminSession>(req.cookies, sessionOptions);
+  const session = await getIronSession<AdminSession>(req, res, sessionOptions);
   if (!session.userId) {
     const url = req.nextUrl.clone();
     url.pathname = "/admin/login";
