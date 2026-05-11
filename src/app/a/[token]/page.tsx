@@ -98,6 +98,8 @@ export default async function PublicGalleryPage({ params }: Props) {
   });
 
   const photoMap = new Map(decorated.map((p) => [p.id, p]));
+  // Stable index map for grid-stagger fade-in (CSS --i var).
+  const photoIndex = new Map(decorated.map((p, i) => [p.id, i]));
 
   // Page-view dedupe: skip the insert if the same viewer recorded a
   // page_view in the last 30 minutes. Prevents F5 / lightbox-close
@@ -133,7 +135,7 @@ export default async function PublicGalleryPage({ params }: Props) {
               <img
                 src={coverUrl}
                 alt=""
-                className="w-full object-cover max-h-[60vh] sm:max-h-[85vh]"
+                className="w-full object-cover max-h-[60vh] sm:max-h-[85vh] cover-kenburns"
               />
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               <div className="absolute inset-x-0 bottom-0 px-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:pb-16 text-center">
@@ -186,6 +188,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           webUrl={photoMap.get(item.id)!.web_url}
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
+                          index={photoIndex.get(item.id) ?? 0}
                         />
                       ))}
                     </div>
@@ -207,6 +210,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           webUrl={photoMap.get(item.id)!.web_url}
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
+                          index={photoIndex.get(item.id) ?? 0}
                         />
                       ))}
                     </div>

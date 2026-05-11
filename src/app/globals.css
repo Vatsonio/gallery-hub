@@ -32,12 +32,13 @@ body {
 
 @keyframes heart-burst {
   0%   { transform: scale(0.4) rotate(-8deg); opacity: 0; }
-  30%  { transform: scale(1.2) rotate(0deg); opacity: 1; }
+  30%  { transform: scale(1.25) rotate(0deg); opacity: 1; }
   60%  { transform: scale(1.0) rotate(2deg); opacity: 1; }
-  100% { transform: scale(1.4) rotate(0deg); opacity: 0; }
+  100% { transform: scale(1.5) rotate(0deg); opacity: 0; }
 }
 .heart-burst-anim {
-  animation: heart-burst 600ms ease-out forwards;
+  /* Slight bounce on the way up; smooth fade out. */
+  animation: heart-burst 650ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 .glass-dock {
@@ -45,4 +46,66 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Glass dock entry — slide up from bottom + soft fade. */
+@keyframes dock-slide-up {
+  from { transform: translate(-50%, 16px); opacity: 0; }
+  to   { transform: translate(-50%, 0);    opacity: 1; }
+}
+.glass-dock-anim {
+  animation: dock-slide-up 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Photo tile grid stagger — opacity + 4px lift on mount. The --i CSS var
+ * is set per-tile from the photoIndex map (capped at 60 to keep the
+ * total delay reasonable). */
+@keyframes tile-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.photo-tile {
+  animation: tile-fade-in 420ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 22ms);
+  will-change: transform, opacity;
+}
+
+/* Lightbox entry — gentle scale + fade. */
+@keyframes lightbox-enter {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.lightbox-anim {
+  animation: lightbox-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Cover hero — gentle ken-burns loop. */
+@keyframes ken-burns {
+  0%   { transform: scale(1);    }
+  100% { transform: scale(1.05); }
+}
+.cover-kenburns {
+  animation: ken-burns 24s ease-in-out infinite alternate;
+  transform-origin: center 40%;
+}
+
+/* Heart overlay icon — pulse + scale on toggle. */
+@keyframes heart-pulse {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+.heart-pulse-anim {
+  animation: heart-pulse 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heart-burst-anim,
+  .glass-dock-anim,
+  .photo-tile,
+  .lightbox-anim,
+  .cover-kenburns,
+  .heart-pulse-anim {
+    animation: none !important;
+  }
 }

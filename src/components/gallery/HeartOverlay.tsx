@@ -25,9 +25,12 @@ export default function HeartOverlay({
   const dim = size === "sm" ? "h-7 w-7" : "h-9 w-9";
   const icon = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
 
+  // The `key` flips on toggle so the pulse animation replays on each
+  // state change (filled → outlined or vice versa).
   const inner = (
     <Heart
-      className={cn(icon, "transition")}
+      key={favorited ? "f" : "o"}
+      className={cn(icon, "transition heart-pulse-anim")}
       fill={favorited ? "#ff4d6d" : "none"}
       color={favorited ? "#ff4d6d" : "rgba(255,255,255,0.85)"}
       strokeWidth={2}

@@ -124,6 +124,7 @@ export default async function FavoritesPage({ params }: Props) {
   });
 
   const photoMap = new Map(decorated.map((p) => [p.id, p]));
+  const photoIndex = new Map(decorated.map((p, i) => [p.id, i]));
 
   return (
     <GalleryShell
@@ -153,6 +154,7 @@ export default async function FavoritesPage({ params }: Props) {
                     webUrl={photoMap.get(item.id)!.web_url}
                     flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                     initialFavorited={true}
+                    index={photoIndex.get(item.id) ?? 0}
                   />
                 ))}
               </div>
@@ -174,6 +176,7 @@ export default async function FavoritesPage({ params }: Props) {
                     webUrl={photoMap.get(item.id)!.web_url}
                     flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                     initialFavorited={true}
+                    index={photoIndex.get(item.id) ?? 0}
                   />
                 ))}
               </div>

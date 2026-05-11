@@ -158,7 +158,7 @@ export default function Lightbox({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none"
+      className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none lightbox-anim"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
