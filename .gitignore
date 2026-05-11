@@ -10,3 +10,7 @@ coverage
 .env.local
 .env.*.local
 .DS_Store
+# Playwright
+test-results/
+playwright-report/
+tests/e2e/.fixture.json
