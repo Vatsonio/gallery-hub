@@ -16,6 +16,7 @@ import {
 } from "@/lib/viewer";
 import { listFavoritePhotoIds } from "@/lib/favorites";
 import { requireAdminSessionFromCookies } from "@/lib/session";
+import { computeExportSizes } from "@/lib/exportSizes";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "./_gallery-shell";
 
@@ -114,8 +115,14 @@ export default async function PublicGalleryPage({ params }: Props) {
     VALUES (${token}, ${viewerId}, 'page_view')
   `.catch(() => undefined);
 
+  const exportSizes = await computeExportSizes(token, viewerId, album.id);
+
   return (
-    <GalleryShell token={token} favoritesCount={favoriteIds.length}>
+    <GalleryShell
+      token={token}
+      favoritesCount={favoriteIds.length}
+      exportSizes={exportSizes}
+    >
       <main>
         {coverPhoto && coverUrl ? (
           <section className="relative w-full max-h-[60vh] sm:max-h-[85vh] overflow-hidden">

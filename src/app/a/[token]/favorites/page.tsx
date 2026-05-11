@@ -17,6 +17,7 @@ import {
 } from "@/lib/viewer";
 import { listFavoritePhotoIds } from "@/lib/favorites";
 import { requireAdminSessionFromCookies } from "@/lib/session";
+import { computeExportSizes } from "@/lib/exportSizes";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "../_gallery-shell";
 
@@ -82,8 +83,9 @@ export default async function FavoritesPage({ params }: Props) {
   const favIds = await listFavoritePhotoIds(token, viewerId);
 
   if (favIds.length === 0) {
+    const emptySizes = await computeExportSizes(token, viewerId, album.id);
     return (
-      <GalleryShell token={token} favoritesCount={0}>
+      <GalleryShell token={token} favoritesCount={0} exportSizes={emptySizes}>
         <Header token={token} count={0} />
         <main className="flex flex-col items-center justify-center px-6 py-24 text-center text-white/60 min-h-[60vh]">
           <div className="text-2xl font-light text-white/80">No favorites yet</div>
@@ -116,6 +118,8 @@ export default async function FavoritesPage({ params }: Props) {
   const totalBytes = decorated.reduce((s, p) => s + Number(p.orig_bytes ?? 0), 0);
   const sizeLabel = formatBytes(totalBytes);
 
+  const exportSizes = await computeExportSizes(token, viewerId, album.id);
+
   const desktopRows = layoutJustifiedRows({
     photos: decorated.map((p) => ({ id: p.id, width: p.width, height: p.height })),
     containerWidth: 1400,
@@ -139,6 +143,7 @@ export default async function FavoritesPage({ params }: Props) {
       token={token}
       favoritesCount={favIds.length}
       favoritesSizeLabel={sizeLabel}
+      exportSizes={exportSizes}
     >
       <Header token={token} count={favIds.length} />
       <div className="mx-auto max-w-screen-2xl">
