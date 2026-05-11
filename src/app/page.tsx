@@ -1,7 +1,5 @@
-export default function HomePage() {
-  return (
-    <main className="min-h-screen flex items-center justify-center">
-      <p className="text-text-muted text-sm tracking-wider uppercase">Gallery Hub</p>
-    </main>
-  );
+import { redirect } from "next/navigation";
+
+export default function HomePage(): never {
+  redirect("/admin/login");
 }
