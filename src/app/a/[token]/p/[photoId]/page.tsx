@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
@@ -51,26 +50,14 @@ export default async function PublicPhotoPage({ params }: Props) {
   const prev = idx > 0 ? photos[idx - 1] : null;
   const next = idx < photos.length - 1 ? photos[idx + 1] : null;
 
-  // Resolve viewer id (admin-preview never persists).
+  // Viewer cookie is minted by middleware. Admin previews skip it and fall
+  // back to the admin-preview sentinel.
   const adminSession = await requireAdminSessionFromCookies().catch(() => ({
     ok: false as const,
   }));
-  let viewerId: string;
-  if (adminSession.ok) {
-    viewerId = ADMIN_PREVIEW_VIEWER_ID;
-  } else {
-    viewerId = jar.get(VIEWER_COOKIE)?.value ?? "";
-    if (!viewerId) {
-      viewerId = randomUUID();
-      jar.set(VIEWER_COOKIE, viewerId, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: `/a/${token}`,
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
-  }
+  const viewerId = adminSession.ok
+    ? ADMIN_PREVIEW_VIEWER_ID
+    : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
   const [largeUrl, favIds] = await Promise.all([
     presignGet(variantKey(album.id, photo.id, "large"), 3600),

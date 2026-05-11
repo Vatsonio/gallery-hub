@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
 import {
   resolveShareLinkStatus,
@@ -50,26 +49,16 @@ export default async function PublicGalleryPage({ params }: Props) {
   const album = await getAlbumById(status.link.album_id);
   if (!album) notFound();
 
-  // Resolve viewer id (admin preview never persists a cookie).
+  // Resolve viewer id. The gh_viewer cookie is minted by middleware before
+  // the page renders, so here we only read. Admin previews never get a
+  // viewer cookie (middleware skips minting when an admin session is
+  // present) — they fall back to the admin-preview sentinel.
   const adminSession = await requireAdminSessionFromCookies().catch(() => ({
     ok: false as const,
   }));
-  let viewerId: string;
-  if (adminSession.ok) {
-    viewerId = ADMIN_PREVIEW_VIEWER_ID;
-  } else {
-    viewerId = jar.get(VIEWER_COOKIE)?.value ?? "";
-    if (!viewerId) {
-      viewerId = randomUUID();
-      jar.set(VIEWER_COOKIE, viewerId, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: `/a/${token}`,
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
-  }
+  const viewerId = adminSession.ok
+    ? ADMIN_PREVIEW_VIEWER_ID
+    : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
   const photos = (await listPhotos(album.id)).filter((p) => p.status === "ready");
   const [decorated, favoriteIds] = await Promise.all([

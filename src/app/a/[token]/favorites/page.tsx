@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { randomUUID } from "node:crypto";
 import { ChevronLeft } from "lucide-react";
 import {
   resolveShareLinkStatus,
@@ -59,26 +58,14 @@ export default async function FavoritesPage({ params }: Props) {
   const album = await getAlbumById(status.link.album_id);
   if (!album) notFound();
 
-  // Resolve viewer id (admin preview never persists).
+  // Viewer cookie is minted by middleware. Admin previews fall back to the
+  // admin-preview sentinel because middleware skips minting for them.
   const adminSession = await requireAdminSessionFromCookies().catch(() => ({
     ok: false as const,
   }));
-  let viewerId: string;
-  if (adminSession.ok) {
-    viewerId = ADMIN_PREVIEW_VIEWER_ID;
-  } else {
-    viewerId = jar.get(VIEWER_COOKIE)?.value ?? "";
-    if (!viewerId) {
-      viewerId = randomUUID();
-      jar.set(VIEWER_COOKIE, viewerId, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: `/a/${token}`,
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
-  }
+  const viewerId = adminSession.ok
+    ? ADMIN_PREVIEW_VIEWER_ID
+    : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
   const favIds = await listFavoritePhotoIds(token, viewerId);
 
