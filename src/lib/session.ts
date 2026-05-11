@@ -50,9 +50,12 @@ export async function requireAdminSession(req: Request): Promise<AdminAuthResult
     get(name: string) { const v = parsed.get(name); return v ? { name, value: v } : undefined; },
     set(_name: string, _value: string, _opts?: unknown) { /* no-op for request side */ },
     delete(_name: string) { /* no-op */ }
-  } as unknown as Parameters<typeof getIronSession>[0];
+  };
 
-  const session = await getIronSession<AdminSession>(cookieStoreLike, sessionOptions);
+  const session = await getIronSession<AdminSession>(
+    cookieStoreLike as unknown as never,
+    sessionOptions
+  );
   if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
   return { ok: false };
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { POST } from "@/app/api/upload/presign/route";
 import { createAlbum } from "@/lib/albums";
 import { sql } from "@/lib/db";
@@ -15,7 +15,7 @@ function mockReq(body: unknown, authed = true): Request {
 }
 
 beforeAll(async () => {
-  process.env.NODE_ENV = "test";
+  vi.stubEnv("NODE_ENV", "test");
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
   await sql`DELETE FROM photos`;
   await sql`DELETE FROM albums`;

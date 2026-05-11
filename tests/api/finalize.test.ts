@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { POST } from "@/app/api/upload/finalize/route";
 import { createAlbum, listPhotos } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
@@ -13,7 +13,7 @@ function mockReq(body: unknown): Request {
 }
 
 beforeAll(async () => {
-  process.env.NODE_ENV = "test";
+  vi.stubEnv("NODE_ENV", "test");
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
 });
 
