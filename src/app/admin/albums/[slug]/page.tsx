@@ -71,7 +71,7 @@ export default async function AlbumDetailPage({ params }: Props) {
 
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Upload</h2>
-        <Dropzone albumId={album.id} onComplete={() => { }} />
+        <Dropzone albumId={album.id} />
       </section>
 
       <section>

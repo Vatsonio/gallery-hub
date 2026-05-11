@@ -8,7 +8,7 @@ import type {
 
 interface Props {
   albumId: string;
-  onComplete: () => void;
+  onComplete?: () => void;
 }
 
 interface RowState {
@@ -136,7 +136,7 @@ export function Dropzone({ albumId, onComplete }: Props) {
         body: JSON.stringify(finalizeBody),
       });
     }
-    onComplete();
+    onComplete?.();
   }, [albumId, onComplete]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
