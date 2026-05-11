@@ -164,6 +164,6 @@ export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
     ORDER BY a.updated_at DESC`;
   return Promise.all(rows.map(async (r) => ({
     ...r,
-    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "thumb"), 3600) : null,
+    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "web"), 3600) : null,
   })));
 }
