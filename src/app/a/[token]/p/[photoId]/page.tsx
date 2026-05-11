@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { sql } from "@/lib/db";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet } from "@/lib/presign";
+import { presignGet, contentDispositionAttachment } from "@/lib/presign";
 import { variantKey, originalKey } from "@/lib/keys";
 import {
   ADMIN_PREVIEW_VIEWER_ID,
@@ -67,7 +67,18 @@ export default async function PublicPhotoPage({ params }: Props) {
   let originalUrl: string | null = null;
   if (status.link.allow_download) {
     const ext = inferExt(photo.filename);
-    originalUrl = await presignGet(originalKey(album.id, photo.id, ext), 3600);
+    // Force a file download with the original filename. Without
+    // ResponseContentDisposition the browser may render the image inline
+    // (cross-origin presigned URLs make the <a download> attribute
+    // a hint that the response can override) — by setting it on the
+    // presigned URL we guarantee the Save button writes a file.
+    originalUrl = await presignGet(
+      originalKey(album.id, photo.id, ext),
+      3600,
+      {
+        responseContentDisposition: contentDispositionAttachment(photo.filename),
+      },
+    );
   }
 
   await sql`
