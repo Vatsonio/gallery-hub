@@ -170,7 +170,7 @@ export default async function PublicGalleryPage({ params }: Props) {
           ) : (
             <>
               {/* Mobile: tighter rows, smaller target height yields ~2 photos/row at 375px. */}
-              <div className="sm:hidden flex flex-col gap-0.5 px-0.5 py-4 pb-[max(6rem,env(safe-area-inset-bottom))]">
+              <div className="sm:hidden flex flex-col gap-0.5 px-0.5 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+9rem)]">
                 {mobileRows.map((row, i) => {
                   const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
                   return (
@@ -196,7 +196,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                 })}
               </div>
               {/* Desktop: dense justified rows. */}
-              <div className="hidden sm:flex flex-col gap-1 px-1 py-8 pb-16">
+              <div className="hidden sm:flex flex-col gap-1 px-1 pb-24">
                 {desktopRows.map((row, i) => {
                   const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
                   return (

@@ -136,7 +136,7 @@ export default async function FavoritesPage({ params }: Props) {
       <Header token={token} count={favIds.length} />
       <div className="mx-auto max-w-screen-2xl">
         {/* Mobile */}
-        <div className="sm:hidden flex flex-col gap-0.5 px-0.5 pb-[max(8rem,env(safe-area-inset-bottom))]">
+        <div className="sm:hidden flex flex-col gap-0.5 px-0.5 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+9rem)]">
           {mobileRows.map((row, i) => {
             const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
             return (
