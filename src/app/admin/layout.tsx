@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Images, Upload, Link2, Heart, Activity, HardDrive, Settings, LogOut } from "lucide-react";
+import { Images, LogOut } from "lucide-react";
 import { logoutAction } from "./logout/actions";
 import { getAdminSession } from "@/lib/session";
 
@@ -8,22 +8,6 @@ const NAV = [
     title: "Workspace",
     items: [
       { href: "/admin/albums", label: "Albums", icon: Images },
-      { href: "/admin/uploads", label: "Uploads", icon: Upload },
-      { href: "/admin/share-links", label: "Share Links", icon: Link2 }
-    ]
-  },
-  {
-    title: "Insights",
-    items: [
-      { href: "/admin/selections", label: "Client Selections", icon: Heart },
-      { href: "/admin/activity", label: "Activity", icon: Activity }
-    ]
-  },
-  {
-    title: "System",
-    items: [
-      { href: "/admin/storage", label: "Storage", icon: HardDrive },
-      { href: "/admin/settings", label: "Settings", icon: Settings }
     ]
   }
 ];
