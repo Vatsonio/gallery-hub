@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0a0a;
+  --color-bg-elevated: #0d0d0d;
+  --color-bg-card: #141414;
+  --color-line: #1f1f1f;
+  --color-text: #f5f5f5;
+  --color-text-muted: #9ca3af;
+  --color-rose-accent: #ff4d6d;
+  --color-rose-hover: #ff6b85;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--color-line);
+}
