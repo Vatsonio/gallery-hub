@@ -1,32 +1,20 @@
-import { Plus, Images } from "lucide-react";
+import { listAlbumsWithStats } from "@/lib/albums";
+import { AlbumCard } from "@/components/admin/AlbumCard";
+import { NewAlbumCard } from "@/components/admin/NewAlbumCard";
 
-export default function AlbumsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function AlbumsPage() {
+  const albums = await listAlbumsWithStats();
   return (
-    <div className="px-8 py-8">
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-wider">Albums</h1>
-          <p className="text-text-muted text-sm mt-1">Create albums and share them with clients.</p>
-        </div>
-        <button
-          type="button"
-          disabled
-          title="Album creation lands in M2"
-          className="inline-flex items-center gap-2 rounded-lg bg-bg-card border border-line px-3 py-2 text-sm text-text-muted cursor-not-allowed"
-        >
-          <Plus className="size-4" />
-          New album
-        </button>
+    <div className="p-8">
+      <header className="mb-8 flex items-baseline justify-between">
+        <h1 className="text-2xl font-light tracking-wide text-white">Albums</h1>
+        <p className="text-sm text-zinc-500">{albums.length} total</p>
       </header>
-
-      <div className="rounded-2xl border border-dashed border-line p-12 flex flex-col items-center justify-center text-center bg-bg-elevated">
-        <div className="size-12 rounded-full bg-bg-card border border-line flex items-center justify-center mb-4">
-          <Images className="size-5 text-text-muted" />
-        </div>
-        <p className="text-sm font-medium">No albums yet</p>
-        <p className="text-text-muted text-sm mt-1 max-w-sm">
-          Album creation, photo uploads, and share links arrive in the next milestone.
-        </p>
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <NewAlbumCard />
+        {albums.map((a) => <AlbumCard key={a.id} album={a} />)}
       </div>
     </div>
   );

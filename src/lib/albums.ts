@@ -1,6 +1,8 @@
 import { sql } from "@/lib/db";
 import { randomUUID } from "node:crypto";
-import type { AlbumRow, AlbumStatus, PhotoRow } from "@/lib/types";
+import { presignGet } from "@/lib/presign";
+import { variantKey } from "@/lib/keys";
+import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoRow } from "@/lib/types";
 
 function slugify(input: string): string {
   return input
@@ -134,4 +136,18 @@ export async function markPhotoReady(photoId: string, takenAt?: Date | null): Pr
   } else {
     await sql`UPDATE photos SET status = 'ready' WHERE id = ${photoId}`;
   }
+}
+
+export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
+  const rows = await sql<(AlbumRow & { photo_count: number })[]>`
+    SELECT a.*, COALESCE(p.cnt, 0)::int AS photo_count
+    FROM albums a
+    LEFT JOIN (SELECT album_id, COUNT(*)::int AS cnt FROM photos GROUP BY album_id) p
+      ON p.album_id = a.id
+    WHERE a.deleted_at IS NULL
+    ORDER BY a.updated_at DESC`;
+  return Promise.all(rows.map(async (r) => ({
+    ...r,
+    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "thumb"), 3600) : null,
+  })));
 }
