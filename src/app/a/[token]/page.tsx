@@ -127,6 +127,7 @@ export default async function PublicGalleryPage({ params }: Props) {
       token={token}
       favoritesCount={favoriteIds.length}
       exportSizes={exportSizes}
+      isAdminPreview={adminSession.ok}
     >
       <main>
         {coverPhoto && coverUrl ? (

@@ -107,6 +107,9 @@ export default function PhotoTile({
   function handleTouchEnd(e: React.TouchEvent): void {
     // Only register single-finger taps without significant movement.
     if (e.changedTouches.length !== 1) return;
+    // Prevent the synthetic mouse click that browsers fire ~300ms after
+    // touchend. Desktop clicks (real mouse) still navigate via onClick.
+    e.preventDefault();
     const now = Date.now();
     if (now - lastTouchTapAt.current <= DOUBLE_TAP_WINDOW_MS) {
       // Second tap — claim as double-tap.
@@ -125,12 +128,8 @@ export default function PhotoTile({
   }
 
   function handleClick(e: React.MouseEvent): void {
-    // React fires onClick after a touchend. If the touch handler already
-    // scheduled (or fired) the navigation, suppress this synthetic click.
-    // We can detect a recent touch by lastTouchTapAt / a pending timer.
-    if (pendingNavTimer.current || lastTouchTapAt.current !== 0) return;
-    // Avoid double-nav if this click is being dispatched on top of a
-    // descendant (e.g. the heart overlay handles its own stopPropagation).
+    // Desktop mouse path: just navigate. Touch path calls preventDefault
+    // on touchend so this never fires for taps.
     if (e.defaultPrevented) return;
     navigateToPhoto();
   }

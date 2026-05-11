@@ -72,7 +72,12 @@ export default async function FavoritesPage({ params }: Props) {
   if (favIds.length === 0) {
     const emptySizes = await computeExportSizes(token, viewerId, album.id);
     return (
-      <GalleryShell token={token} favoritesCount={0} exportSizes={emptySizes}>
+      <GalleryShell
+        token={token}
+        favoritesCount={0}
+        exportSizes={emptySizes}
+        isAdminPreview={adminSession.ok}
+      >
         <Header token={token} count={0} />
         <main className="flex flex-col items-center justify-center px-6 py-24 text-center text-white/60 min-h-[60vh]">
           <div className="text-2xl font-light text-white/80">No favorites yet</div>
@@ -132,6 +137,7 @@ export default async function FavoritesPage({ params }: Props) {
       favoritesCount={favIds.length}
       favoritesSizeLabel={sizeLabel}
       exportSizes={exportSizes}
+      isAdminPreview={adminSession.ok}
     >
       <Header token={token} count={favIds.length} />
       <div className="mx-auto max-w-screen-2xl">

@@ -20,6 +20,8 @@ interface Props {
   favoritesSizeLabel?: string;
   /** Byte totals + counts for the three export options. */
   exportSizes: ExportSizes;
+  /** True when the viewer is an admin previewing — favorites won't persist. */
+  isAdminPreview?: boolean;
   children: React.ReactNode;
 }
 
@@ -35,6 +37,7 @@ export default function GalleryShell({
   favoritesCount,
   favoritesSizeLabel,
   exportSizes,
+  isAdminPreview = false,
   children,
 }: Props) {
   const [exportOpen, setExportOpen] = useState(false);
@@ -117,6 +120,12 @@ export default function GalleryShell({
 
   return (
     <>
+      {isAdminPreview && (
+        <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
+          Admin preview — favorites and views are not recorded. Open the link in
+          a private window to test as a real visitor.
+        </div>
+      )}
       {children}
       {showSaveAllFooter && (
         <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">

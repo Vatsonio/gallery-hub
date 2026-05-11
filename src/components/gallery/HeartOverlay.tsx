@@ -62,6 +62,13 @@ export default function HeartOverlay({
         e.preventDefault();
         onClick(e);
       }}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => {
+        // Stop the parent tile's onTouchEnd from scheduling a navigation.
+        // Without this, tapping the heart fires the heart click AND
+        // 280ms later opens the single-photo viewer.
+        e.stopPropagation();
+      }}
       className={cn(
         "absolute right-1.5 top-1.5 inline-flex items-center justify-center rounded-full bg-black/50 backdrop-blur-sm text-white hover:bg-black/70 active:scale-95 transition cursor-pointer",
         dim,
