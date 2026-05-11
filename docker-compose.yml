@@ -79,6 +79,29 @@ services:
     networks:
       - internal
 
+  gallery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: gallery-worker:local
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      NODE_ENV: production
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+      gallery-migrate:
+        condition: service_completed_successfully
+      gallery-minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
 volumes:
   gallery_pgdata:
   gallery_miniodata:
