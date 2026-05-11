@@ -15,6 +15,14 @@ const cspHeader = [
 const nextConfig = {
   output: "standalone",
   experimental: { serverActions: { bodySizeLimit: "50mb" } },
+  serverExternalPackages: ["sharp", "pg-boss"],
+  images: {
+    remotePatterns: [
+      { protocol: "http", hostname: "gallery-minio" },
+      { protocol: "http", hostname: "localhost" },
+      { protocol: "https", hostname: "gallery.divass.space" }
+    ]
+  },
   async headers() {
     return [
       {
