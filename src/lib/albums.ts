@@ -138,6 +138,22 @@ export async function markPhotoReady(photoId: string, takenAt?: Date | null): Pr
   }
 }
 
+export interface VariantSizes {
+  thumb: number;
+  web: number;
+  large: number;
+}
+
+export async function writePhotoVariantSizes(photoId: string, sizes: VariantSizes): Promise<void> {
+  await sql`
+    UPDATE photos
+       SET thumb_bytes = ${sizes.thumb},
+           web_bytes   = ${sizes.web},
+           large_bytes = ${sizes.large}
+     WHERE id = ${photoId}
+  `;
+}
+
 export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
   const rows = await sql<(AlbumRow & { photo_count: number })[]>`
     SELECT a.*, COALESCE(p.cnt, 0)::int AS photo_count

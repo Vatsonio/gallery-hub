@@ -2,7 +2,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET } from "@/lib/minio";
 import { generateVariants, readTakenAt } from "@/lib/images";
 import { variantKey } from "@/lib/keys";
-import { markPhotoReady } from "@/lib/albums";
+import { markPhotoReady, writePhotoVariantSizes } from "@/lib/albums";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
 async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
@@ -52,5 +52,10 @@ export async function handleGenerateDerivatives(
     )
   ]);
 
+  await writePhotoVariantSizes(data.photo_id, {
+    thumb: variants.thumb.length,
+    web: variants.web.length,
+    large: variants.large.length,
+  });
   await markPhotoReady(data.photo_id, taken);
 }
