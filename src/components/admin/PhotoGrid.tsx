@@ -6,12 +6,14 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from "@dnd-kit/sortable";
 import { PhotoTile, type PhotoTileData } from "./PhotoTile";
+import AdminLightbox from "./AdminLightbox";
 import { reorderPhotosAction } from "@/app/admin/albums/actions";
 import type { PhotoRow } from "@/lib/types";
 
 interface PhotoWithThumb extends PhotoRow {
   thumb_url: string | null;
   web_url: string | null;
+  large_url: string | null;
 }
 
 interface ApiResp {
@@ -32,6 +34,7 @@ export function PhotoGrid({
   const [data, setData] = useState<ApiResp | null>(null);
   const [order, setOrder] = useState<string[]>([]);
   const [hadPending, setHadPending] = useState(false);
+  const [openPhotoId, setOpenPhotoId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -91,17 +94,36 @@ export function PhotoGrid({
     };
   });
 
+  // Only `ready` photos in the navigation list — pending photos have no
+  // presigned large_url yet, so lightbox prev/next skips over them.
+  const readyOrder = order.filter((id) => byId.get(id)?.status === "ready");
+  const openIdx = openPhotoId ? readyOrder.indexOf(openPhotoId) : -1;
+  const openPhoto = openPhotoId ? byId.get(openPhotoId) ?? null : null;
+  const prevId = openIdx > 0 ? readyOrder[openIdx - 1] : null;
+  const nextId = openIdx >= 0 && openIdx < readyOrder.length - 1 ? readyOrder[openIdx + 1] : null;
+
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={order} strategy={rectSortingStrategy}>
         <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-6 gap-3 px-1">
           {tiles.map((t) => (
             <div className="group mb-3 break-inside-avoid" key={t.id}>
-              <PhotoTile photo={t} onChange={reload} />
+              <PhotoTile photo={t} onChange={reload} onPreview={setOpenPhotoId} />
             </div>
           ))}
         </div>
       </SortableContext>
+      {openPhoto && (openPhoto.large_url || openPhoto.web_url) && (
+        <AdminLightbox
+          photoUrl={openPhoto.large_url ?? openPhoto.web_url!}
+          prevId={prevId}
+          nextId={nextId}
+          index={openIdx}
+          total={readyOrder.length}
+          onClose={() => setOpenPhotoId(null)}
+          onNavigate={setOpenPhotoId}
+        />
+      )}
     </DndContext>
   );
 }

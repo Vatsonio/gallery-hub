@@ -19,6 +19,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     ...p,
     thumb_url: p.status === "ready" ? await presignGet(variantKey(album.id, p.id, "thumb"), 3600) : null,
     web_url: p.status === "ready" ? await presignGet(variantKey(album.id, p.id, "web"), 3600) : null,
+    large_url: p.status === "ready" ? await presignGet(variantKey(album.id, p.id, "large"), 3600) : null,
   })));
 
   return NextResponse.json({ album, photos: decorated });
