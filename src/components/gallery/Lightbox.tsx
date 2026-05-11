@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   X,
@@ -11,8 +11,13 @@ import {
   Share2,
   Info,
 } from "lucide-react";
+import HeartBurst from "./HeartBurst";
+import { createDoubleTapDetector } from "@/lib/double-tap";
+import { toggleFavorite } from "@/app/a/[token]/_actions";
 
 interface Props {
+  token: string;
+  photoId: string;
   photoUrl: string;
   originalUrl: string | null;
   downloadFilename: string;
@@ -21,9 +26,12 @@ interface Props {
   backHref: string;
   index: number;
   total: number;
+  initialFavorited: boolean;
 }
 
 export default function Lightbox({
+  token,
+  photoId,
   photoUrl,
   originalUrl,
   downloadFilename,
@@ -32,12 +40,20 @@ export default function Lightbox({
   backHref,
   index,
   total,
+  initialFavorited,
 }: Props) {
   const router = useRouter();
   const downloadEl = useRef<HTMLAnchorElement>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const [touchTranslate, setTouchTranslate] = useState(0);
-  const [liked, setLiked] = useState(false);
+  const [favorited, setFavorited] = useState(initialFavorited);
+  const [burst, setBurst] = useState(0);
+  const [, startTransition] = useTransition();
+  const inflight = useRef(false);
+
+  useEffect(() => {
+    setFavorited(initialFavorited);
+  }, [initialFavorited, photoId]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -47,11 +63,38 @@ export default function Lightbox({
         router.push(prevHref);
       } else if (e.key === "ArrowRight" && nextHref) {
         router.push(nextHref);
+      } else if (e.key === "f" || e.key === "F") {
+        commitToggle(!favorited);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router, backHref, prevHref, nextHref]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, backHref, prevHref, nextHref, favorited]);
+
+  function commitToggle(intent: boolean) {
+    setFavorited(intent);
+    if (intent) setBurst((b) => b + 1);
+    if (inflight.current) return;
+    inflight.current = true;
+    startTransition(async () => {
+      try {
+        const res = await toggleFavorite(token, photoId);
+        setFavorited(res.favorited);
+      } catch {
+        setFavorited(!intent);
+      } finally {
+        inflight.current = false;
+      }
+    });
+  }
+
+  const detectorRef = useRef(
+    createDoubleTapDetector({
+      windowMs: 280,
+      onDouble: () => commitToggle(true),
+    }),
+  );
 
   function onTouchStart(e: React.TouchEvent) {
     const t = e.touches[0];
@@ -71,6 +114,11 @@ export default function Lightbox({
     setTouchTranslate(0);
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
+    // Pure tap (<10px both axes) → double-tap detector.
+    if (absX < 10 && absY < 10) {
+      detectorRef.current.tap();
+      return;
+    }
     if (absY > absX && dy > 80) {
       router.push(backHref);
       return;
@@ -86,9 +134,8 @@ export default function Lightbox({
     if (downloadEl.current) downloadEl.current.click();
   }
 
-  function toggleLike() {
-    // Favorites not yet implemented; visual-only feedback for now.
-    setLiked((v) => !v);
+  function onLikeClick() {
+    commitToggle(!favorited);
   }
 
   async function share() {
@@ -116,13 +163,22 @@ export default function Lightbox({
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
-      <img
-        src={photoUrl}
-        alt=""
-        draggable={false}
-        className="max-h-screen max-w-full object-contain transition-transform"
-        style={{ transform: touchTranslate ? `translateX(${touchTranslate}px)` : undefined }}
-      />
+      {/* Relative wrapper so HeartBurst can overlay the image centered. */}
+      <div className="relative max-h-screen max-w-full flex items-center justify-center">
+        <img
+          src={photoUrl}
+          alt=""
+          draggable={false}
+          className="max-h-screen max-w-full object-contain transition-transform"
+          style={{ transform: touchTranslate ? `translateX(${touchTranslate}px)` : undefined }}
+          onDoubleClick={(e) => {
+            // Desktop fallback for double-tap.
+            e.preventDefault();
+            commitToggle(true);
+          }}
+        />
+        <HeartBurst trigger={burst} />
+      </div>
 
       {/* Top bar: close + counter + info (placeholder) */}
       <div
@@ -170,7 +226,21 @@ export default function Lightbox({
         </button>
       )}
 
-      {/* Desktop download in top-right (mobile uses bottom bar) */}
+      {/* Desktop favorite + download in top-right (mobile uses bottom bar) */}
+      <button
+        aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+        aria-pressed={favorited}
+        onClick={onLikeClick}
+        className="hidden sm:flex absolute right-4 h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-md text-white hover:bg-black/70 transition"
+        style={{ top: "max(12px, env(safe-area-inset-top))" }}
+      >
+        <Heart
+          className="h-5 w-5"
+          fill={favorited ? "#ff4d6d" : "none"}
+          color={favorited ? "#ff4d6d" : "currentColor"}
+          aria-hidden
+        />
+      </button>
       {originalUrl && (
         <>
           <a
@@ -197,15 +267,15 @@ export default function Lightbox({
         style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
       >
         <button
-          aria-label="Like"
-          aria-pressed={liked}
-          onClick={toggleLike}
+          aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+          aria-pressed={favorited}
+          onClick={onLikeClick}
           className="h-11 w-11 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-md text-white hover:bg-white/20 transition"
         >
           <Heart
             className="h-5 w-5"
-            fill={liked ? "currentColor" : "none"}
-            color={liked ? "#ff4d6d" : "currentColor"}
+            fill={favorited ? "#ff4d6d" : "none"}
+            color={favorited ? "#ff4d6d" : "currentColor"}
             aria-hidden
           />
         </button>

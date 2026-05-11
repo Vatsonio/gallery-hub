@@ -1,9 +1,17 @@
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
-import { resolveShareLinkStatus } from "@/lib/share";
+import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
 import { presignGet } from "@/lib/presign";
 import { variantKey, originalKey } from "@/lib/keys";
+import {
+  ADMIN_PREVIEW_VIEWER_ID,
+  VIEWER_COOKIE,
+} from "@/lib/viewer";
+import { listFavoritePhotoIds } from "@/lib/favorites";
+import { requireAdminSessionFromCookies } from "@/lib/session";
 import Lightbox from "@/components/gallery/Lightbox";
 
 export const dynamic = "force-dynamic";
@@ -20,11 +28,16 @@ function inferExt(filename: string): string {
 
 export default async function PublicPhotoPage({ params }: Props) {
   const { token, photoId } = await params;
-  const status = await resolveShareLinkStatus(token, null);
+  const jar = await cookies();
+  const unlocked = jar.get(unlockCookieName(token))?.value ?? null;
+  const status = await resolveShareLinkStatus(token, unlocked);
 
   if (status.kind === "not_found") notFound();
-  if (status.kind === "expired" || status.kind === "locked") {
+  if (status.kind === "expired") {
     redirect(`/a/${token}`);
+  }
+  if (status.kind === "locked") {
+    redirect(`/a/${token}/password`);
   }
 
   const album = await getAlbumById(status.link.album_id);
@@ -38,7 +51,31 @@ export default async function PublicPhotoPage({ params }: Props) {
   const prev = idx > 0 ? photos[idx - 1] : null;
   const next = idx < photos.length - 1 ? photos[idx + 1] : null;
 
-  const largeUrl = await presignGet(variantKey(album.id, photo.id, "large"), 3600);
+  // Resolve viewer id (admin-preview never persists).
+  const adminSession = await requireAdminSessionFromCookies().catch(() => ({
+    ok: false as const,
+  }));
+  let viewerId: string;
+  if (adminSession.ok) {
+    viewerId = ADMIN_PREVIEW_VIEWER_ID;
+  } else {
+    viewerId = jar.get(VIEWER_COOKIE)?.value ?? "";
+    if (!viewerId) {
+      viewerId = randomUUID();
+      jar.set(VIEWER_COOKIE, viewerId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: `/a/${token}`,
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
+  }
+
+  const [largeUrl, favIds] = await Promise.all([
+    presignGet(variantKey(album.id, photo.id, "large"), 3600),
+    listFavoritePhotoIds(token, viewerId),
+  ]);
 
   let originalUrl: string | null = null;
   if (status.link.allow_download) {
@@ -47,12 +84,14 @@ export default async function PublicPhotoPage({ params }: Props) {
   }
 
   await sql`
-    INSERT INTO view_events (share_token, viewer_id, event_type)
-    VALUES (${token}, 'anon', 'photo_view')
+    INSERT INTO view_events (share_token, viewer_id, event_type, photo_id)
+    VALUES (${token}, ${viewerId}, 'photo_view', ${photo.id})
   `.catch(() => undefined);
 
   return (
     <Lightbox
+      token={token}
+      photoId={photo.id}
       photoUrl={largeUrl}
       originalUrl={originalUrl}
       downloadFilename={photo.filename}
@@ -61,6 +100,7 @@ export default async function PublicPhotoPage({ params }: Props) {
       backHref={`/a/${token}`}
       index={idx}
       total={photos.length}
+      initialFavorited={favIds.includes(photo.id)}
     />
   );
 }
