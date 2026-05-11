@@ -21,7 +21,9 @@ describe.skipIf(dockerOff)("runMigrations", () => {
         "004_share_links.sql",
         "005_favorites.sql",
         "006_view_events.sql",
-        "007_album_soft_delete.sql"
+        "007_album_soft_delete.sql",
+        "008_photo_variant_sizes.sql",
+        "009_view_events_details.sql"
       ]);
 
       const tables = await sql<{ table_name: string }[]>`
