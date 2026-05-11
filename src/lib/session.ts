@@ -24,3 +24,35 @@ export async function getAdminSession(): Promise<IronSession<AdminSession>> {
   const cookieStore = await cookies();
   return getIronSession<AdminSession>(cookieStore, sessionOptions);
 }
+
+export interface AdminAuthOk { ok: true; userId: string; email: string; }
+export interface AdminAuthErr { ok: false; }
+export type AdminAuthResult = AdminAuthOk | AdminAuthErr;
+
+/**
+ * Validates admin auth from an incoming Request (Route Handler / Server Action with manual req).
+ * Honors `x-test-admin: 1` header during tests (NODE_ENV === "test").
+ * Otherwise reads the iron-session cookie from the request headers.
+ */
+export async function requireAdminSession(req: Request): Promise<AdminAuthResult> {
+  if (process.env.NODE_ENV === "test" && req.headers.get("x-test-admin") === "1") {
+    return { ok: true, userId: "test-admin", email: "test@local" };
+  }
+  // Build a CookieStore-like wrapper around the request Cookie header
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const parsed = new Map<string, string>();
+  for (const part of cookieHeader.split(/;\s*/).filter(Boolean)) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    parsed.set(decodeURIComponent(part.slice(0, eq).trim()), decodeURIComponent(part.slice(eq + 1).trim()));
+  }
+  const cookieStoreLike = {
+    get(name: string) { const v = parsed.get(name); return v ? { name, value: v } : undefined; },
+    set(_name: string, _value: string, _opts?: unknown) { /* no-op for request side */ },
+    delete(_name: string) { /* no-op */ }
+  } as unknown as Parameters<typeof getIronSession>[0];
+
+  const session = await getIronSession<AdminSession>(cookieStoreLike, sessionOptions);
+  if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
+  return { ok: false };
+}
