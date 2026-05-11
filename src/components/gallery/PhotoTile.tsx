@@ -141,7 +141,7 @@ export default function PhotoTile({
       tabIndex={0}
       aria-label="Open photo"
       style={{ ...flexStyle, ["--i" as string]: String(Math.min(index, 60)) }}
-      className={`photo-tile group relative block overflow-hidden bg-white/5 cursor-pointer ${className ?? ""}`}
+      className={`photo-tile group relative block overflow-hidden bg-white/5 cursor-pointer select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] ${className ?? ""}`}
       onTouchEnd={handleTouchEnd}
       onClick={handleClick}
       onKeyDown={(e) => {
