@@ -1,8 +1,13 @@
 import {
   S3Client,
   HeadBucketCommand,
-  CreateBucketCommand
+  CreateBucketCommand,
+  HeadObjectCommand,
+  GetObjectCommand,
+  type HeadObjectCommandOutput
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { Readable } from "node:stream";
 
 const globalForS3 = globalThis as unknown as { __s3?: S3Client; __s3Public?: S3Client };
 
@@ -57,6 +62,27 @@ export const s3SignerClient: S3Client = new Proxy({} as S3Client, {
 });
 
 export const BUCKET: string = process.env.MINIO_BUCKET ?? "gallery";
+
+export async function headObject(key: string, bucket: string = BUCKET): Promise<HeadObjectCommandOutput> {
+  return s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+export async function getObjectStream(key: string, bucket: string = BUCKET): Promise<Readable> {
+  const res = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  if (!res.Body) throw new Error(`empty body for ${key}`);
+  return res.Body as Readable;
+}
+
+/**
+ * Presigned GET URL using the PUBLIC endpoint signer — safe to hand to
+ * the browser. Wraps the existing s3SignerClient so callers don't have
+ * to know about the internal/public client split.
+ */
+export async function getPresignedUrl(key: string, ttlSec: number, bucket: string = BUCKET): Promise<string> {
+  return getSignedUrl(s3SignerClient, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+    expiresIn: ttlSec,
+  });
+}
 
 export async function ensureBucket(bucket: string = BUCKET): Promise<void> {
   try {
