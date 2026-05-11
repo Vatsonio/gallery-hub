@@ -55,12 +55,21 @@ export default async function PublicGalleryPage({ params }: Props) {
     ? await presignGet(variantKey(album.id, coverPhoto.id, "large"), 3600)
     : null;
 
-  // Compute justified rows from a hardcoded reference width; flex-basis lets CSS scale.
-  const rows = layoutJustifiedRows({
+  // Compute TWO justified-rows layouts so mobile gets 2-photo rows and desktop
+  // keeps the dense reference layout. flex-basis lets CSS scale either to viewport.
+  const desktopRows = layoutJustifiedRows({
     photos: decorated.map((p) => ({ id: p.id, width: p.width, height: p.height })),
     containerWidth: 1400,
     targetRowHeight: 280,
     gap: 4,
+    maxLastRowScale: 1.5,
+  });
+
+  const mobileRows = layoutJustifiedRows({
+    photos: decorated.map((p) => ({ id: p.id, width: p.width, height: p.height })),
+    containerWidth: 375,
+    targetRowHeight: 200,
+    gap: 2,
     maxLastRowScale: 1.5,
   });
 
@@ -74,16 +83,15 @@ export default async function PublicGalleryPage({ params }: Props) {
   return (
     <main>
       {coverPhoto && coverUrl ? (
-        <section className="relative w-full" style={{ maxHeight: "85vh" }}>
-          <div className="relative w-full" style={{ maxHeight: "85vh" }}>
+        <section className="relative w-full max-h-[60vh] sm:max-h-[85vh] overflow-hidden">
+          <div className="relative w-full max-h-[60vh] sm:max-h-[85vh]">
             <img
               src={coverUrl}
               alt=""
-              className="w-full object-cover"
-              style={{ maxHeight: "85vh" }}
+              className="w-full object-cover max-h-[60vh] sm:max-h-[85vh]"
             />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 px-6 pb-10 sm:pb-16 text-center">
+            <div className="absolute inset-x-0 bottom-0 px-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:pb-16 text-center">
               <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-white drop-shadow">
                 {album.title}
               </h1>
@@ -113,31 +121,64 @@ export default async function PublicGalleryPage({ params }: Props) {
             Photos are still being processed. Refresh in a moment.
           </p>
         ) : (
-          <div className="flex flex-col gap-1 px-1 py-8 pb-16">
-            {rows.map((row, i) => {
-              const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
-              return (
-                <div key={i} className="flex w-full gap-1" style={{ height: row.height }}>
-                  {row.items.map((item) => (
-                    <Link
-                      key={item.id}
-                      href={`/a/${token}/p/${item.id}`}
-                      style={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                      className="block overflow-hidden bg-white/5"
-                    >
-                      <img
-                        src={photoMap.get(item.id)!.web_url}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                      />
-                    </Link>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
+          <>
+            {/* Mobile: tighter rows, smaller target height yields ~2 photos/row at 375px. */}
+            <div className="sm:hidden flex flex-col gap-0.5 px-0.5 py-4 pb-[max(6rem,env(safe-area-inset-bottom))]">
+              {mobileRows.map((row, i) => {
+                const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
+                return (
+                  <div
+                    key={i}
+                    className="flex w-full gap-0.5"
+                    style={{ height: row.height }}
+                  >
+                    {row.items.map((item) => (
+                      <Link
+                        key={item.id}
+                        href={`/a/${token}/p/${item.id}`}
+                        style={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                        className="block overflow-hidden bg-white/5"
+                      >
+                        <img
+                          src={photoMap.get(item.id)!.web_url}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-cover"
+                        />
+                      </Link>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Desktop: dense justified rows. */}
+            <div className="hidden sm:flex flex-col gap-1 px-1 py-8 pb-16">
+              {desktopRows.map((row, i) => {
+                const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
+                return (
+                  <div key={i} className="flex w-full gap-1" style={{ height: row.height }}>
+                    {row.items.map((item) => (
+                      <Link
+                        key={item.id}
+                        href={`/a/${token}/p/${item.id}`}
+                        style={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                        className="block overflow-hidden bg-white/5"
+                      >
+                        <img
+                          src={photoMap.get(item.id)!.web_url}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
+                        />
+                      </Link>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
 
         <footer className="text-center text-xs text-white/30 pb-8">gallery.divass.space</footer>
