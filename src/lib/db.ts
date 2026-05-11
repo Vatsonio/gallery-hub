@@ -23,8 +23,29 @@ function makeClient(): Sql {
   });
 }
 
-export const sql: Sql = globalForDb.db ?? makeClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.db = sql;
+function getClient(): Sql {
+  if (!globalForDb.db) {
+    globalForDb.db = makeClient();
+  }
+  return globalForDb.db;
 }
+
+// Lazy proxy: defers `makeClient()` until first call/property access. Lets
+// vitest start its testcontainers Postgres in `beforeAll` (which runs AFTER
+// ESM module collection) and have DATABASE_URL ready by the time any test
+// actually executes a query.
+export const sql: Sql = new Proxy(
+  function lazySqlStub() {
+    throw new Error("[db] unreachable lazy stub");
+  } as unknown as Sql,
+  {
+    apply(_target, thisArg, args: unknown[]) {
+      const client = getClient() as unknown as (...a: unknown[]) => unknown;
+      return Reflect.apply(client, thisArg, args);
+    },
+    get(_target, prop, receiver) {
+      const client = getClient() as unknown as object;
+      return Reflect.get(client, prop, receiver);
+    }
+  }
+) as Sql;
