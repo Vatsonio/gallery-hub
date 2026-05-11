@@ -65,6 +65,20 @@ export function AlbumForm({ mode, initial }: Props) {
       <Button type="submit" disabled={pending} className="cursor-pointer">
         {pending ? "Saving…" : mode === "create" ? "Create album" : "Save"}
       </Button>
+      {mode === "edit" && initial && (
+        <button
+          type="button"
+          onClick={async () => {
+            if (!confirm("Delete this album? This cannot be undone (cleanup runs hourly).")) return;
+            const { softDeleteAlbumAction } = await import("@/app/admin/albums/actions");
+            await softDeleteAlbumAction(initial.id);
+            router.push("/admin/albums");
+          }}
+          className="ml-3 cursor-pointer text-sm text-rose-300 hover:text-rose-200"
+        >
+          Delete album
+        </button>
+      )}
     </form>
   );
 }
