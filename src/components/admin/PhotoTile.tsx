@@ -12,22 +12,28 @@ import { setCoverAction, deletePhotoAction } from "@/app/admin/albums/actions";
 export interface PhotoTileData {
   id: string;
   thumb_url: string | null;
+  web_url?: string | null;
   status: "uploading" | "processing" | "ready";
   isCover: boolean;
   albumId: string;
+  width: number;
+  height: number;
 }
 
 export function PhotoTile({ photo, onChange }: { photo: PhotoTileData; onChange: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: photo.id });
+  const aspectRatio = photo.width && photo.height ? `${photo.width}/${photo.height}` : "1/1";
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    aspectRatio,
   };
+  const displayUrl = photo.web_url ?? photo.thumb_url;
   return (
-    <div ref={setNodeRef} style={style} className="relative aspect-square overflow-hidden rounded-lg bg-zinc-900 ring-1 ring-white/5">
-      {photo.thumb_url ? (
-        <Image src={photo.thumb_url} alt="" fill sizes="200px" className="object-cover" />
+    <div ref={setNodeRef} style={style} className="relative w-full overflow-hidden rounded-lg bg-zinc-900 ring-1 ring-white/5">
+      {displayUrl ? (
+        <Image src={displayUrl} alt="" fill sizes="(max-width:640px) 50vw, (max-width:768px) 33vw, (max-width:1024px) 25vw, 16vw" className="object-cover" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500">
           {photo.status}

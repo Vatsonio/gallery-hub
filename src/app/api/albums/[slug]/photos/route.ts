@@ -18,6 +18,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const decorated = await Promise.all(photos.map(async (p) => ({
     ...p,
     thumb_url: p.status === "ready" ? await presignGet(variantKey(album.id, p.id, "thumb"), 3600) : null,
+    web_url: p.status === "ready" ? await presignGet(variantKey(album.id, p.id, "web"), 3600) : null,
   })));
 
   return NextResponse.json({ album, photos: decorated });

@@ -11,6 +11,7 @@ import type { PhotoRow } from "@/lib/types";
 
 interface PhotoWithThumb extends PhotoRow {
   thumb_url: string | null;
+  web_url: string | null;
 }
 
 interface ApiResp {
@@ -63,18 +64,21 @@ export function PhotoGrid({ slug }: { slug: string }) {
     return {
       id: p.id,
       thumb_url: p.thumb_url,
+      web_url: p.web_url,
       status: p.status,
       isCover: data.album.cover_photo_id === p.id,
       albumId: data.album.id,
+      width: p.width,
+      height: p.height,
     };
   });
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={order} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+        <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-6 gap-3 px-1">
           {tiles.map((t) => (
-            <div className="group" key={t.id}>
+            <div className="group mb-3 break-inside-avoid" key={t.id}>
               <PhotoTile photo={t} onChange={reload} />
             </div>
           ))}
