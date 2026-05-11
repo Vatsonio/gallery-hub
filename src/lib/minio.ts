@@ -4,20 +4,35 @@ import {
   CreateBucketCommand
 } from "@aws-sdk/client-s3";
 
-const endpoint = process.env.MINIO_ENDPOINT ?? "http://localhost:9000";
-const region = process.env.MINIO_REGION ?? "us-east-1";
-const accessKeyId = process.env.MINIO_ACCESS_KEY ?? "";
-const secretAccessKey = process.env.MINIO_SECRET_KEY ?? "";
-const forcePathStyle = (process.env.MINIO_FORCE_PATH_STYLE ?? "true") !== "false";
+const globalForS3 = globalThis as unknown as { __s3?: S3Client };
 
-export const BUCKET = process.env.MINIO_BUCKET ?? "gallery";
+function makeClient(): S3Client {
+  return new S3Client({
+    endpoint: process.env.MINIO_ENDPOINT ?? "http://localhost:9000",
+    region: process.env.MINIO_REGION ?? "us-east-1",
+    forcePathStyle: (process.env.MINIO_FORCE_PATH_STYLE ?? "true") !== "false",
+    credentials: {
+      accessKeyId: process.env.MINIO_ACCESS_KEY ?? "",
+      secretAccessKey: process.env.MINIO_SECRET_KEY ?? ""
+    }
+  });
+}
 
-export const s3Client = new S3Client({
-  endpoint,
-  region,
-  forcePathStyle,
-  credentials: { accessKeyId, secretAccessKey }
+function getClient(): S3Client {
+  if (!globalForS3.__s3) globalForS3.__s3 = makeClient();
+  return globalForS3.__s3;
+}
+
+// Lazy proxy: defers `makeClient()` until first call/property access so that
+// vitest can spin up its MinIO testcontainer in `beforeAll` and have
+// MINIO_ENDPOINT/credentials ready by the time any test issues a real request.
+export const s3Client: S3Client = new Proxy({} as S3Client, {
+  get(_t, prop, receiver) {
+    return Reflect.get(getClient() as unknown as object, prop, receiver);
+  }
 });
+
+export const BUCKET: string = process.env.MINIO_BUCKET ?? "gallery";
 
 export async function ensureBucket(bucket: string = BUCKET): Promise<void> {
   try {
