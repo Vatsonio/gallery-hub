@@ -22,6 +22,11 @@ interface Props {
   onClose: () => void;
   token: string;
   options: ExportOption[];
+  /**
+   * Preselect a specific option on open. Falls back to the first
+   * enabled option if the preselect is missing or disabled.
+   */
+  preselect?: ExportOptionId;
 }
 
 function fmtBytes(b: number): string {
@@ -32,15 +37,32 @@ function fmtBytes(b: number): string {
   return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-export default function ExportModal({ open, onClose, token, options }: Props) {
+export default function ExportModal({
+  open,
+  onClose,
+  token,
+  options,
+  preselect,
+}: Props) {
   const firstEnabled = options.find((o) => !o.disabled)?.id ?? options[0]?.id;
-  const [selected, setSelected] = useState<ExportOptionId | undefined>(firstEnabled);
+  const initial =
+    preselect && options.some((o) => o.id === preselect && !o.disabled)
+      ? preselect
+      : firstEnabled;
+  const [selected, setSelected] = useState<ExportOptionId | undefined>(initial);
 
   // Reset selection whenever the modal opens so a stale id doesn't survive
-  // option-list changes (e.g. after the favorites set shifts).
+  // option-list changes (e.g. after the favorites set shifts). Honor the
+  // caller's preselect when valid.
   useEffect(() => {
-    if (open) setSelected(firstEnabled);
-  }, [open, firstEnabled]);
+    if (open) {
+      const target =
+        preselect && options.some((o) => o.id === preselect && !o.disabled)
+          ? preselect
+          : firstEnabled;
+      setSelected(target);
+    }
+  }, [open, firstEnabled, preselect, options]);
 
   // Esc-to-close.
   useEffect(() => {

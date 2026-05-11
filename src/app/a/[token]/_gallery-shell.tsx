@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { FileImage, Heart, ImageIcon } from "lucide-react";
 import MobileTabBar from "@/components/gallery/MobileTabBar";
 import GlassDock from "@/components/gallery/GlassDock";
-import ExportModal, { type ExportOption } from "@/components/gallery/ExportModal";
+import ExportModal, {
+  type ExportOption,
+  type ExportOptionId,
+} from "@/components/gallery/ExportModal";
 import type { ExportSizes } from "@/lib/exportSizes";
 
 interface Props {
@@ -33,6 +36,7 @@ export default function GalleryShell({
   children,
 }: Props) {
   const [exportOpen, setExportOpen] = useState(false);
+  const [preselect, setPreselect] = useState<ExportOptionId | undefined>(undefined);
 
   // Restore scroll position when returning from the single-photo lightbox.
   // PhotoTile writes sessionStorage[gh:return-scroll:<token>] before nav;
@@ -102,20 +106,44 @@ export default function GalleryShell({
     [exportSizes],
   );
 
+  // Decide which dock to show. Favorites win when the viewer has any
+  // hearted photos; otherwise fall back to a "Save all" CTA so the user
+  // can grab the whole album without picking favorites first.
+  const showFavoritesDock = favoritesCount > 0;
+  const showSaveAllDock =
+    !showFavoritesDock && exportSizes.totalCount > 0;
+
   return (
     <>
       {children}
-      <GlassDock
-        count={favoritesCount}
-        sizeLabel={favoritesSizeLabel}
-        onClick={() => setExportOpen(true)}
-      />
+      {showFavoritesDock && (
+        <GlassDock
+          variant="favorites"
+          count={favoritesCount}
+          sizeLabel={favoritesSizeLabel}
+          onClick={() => {
+            setPreselect("favorites-original");
+            setExportOpen(true);
+          }}
+        />
+      )}
+      {showSaveAllDock && (
+        <GlassDock
+          variant="save-all"
+          count={exportSizes.totalCount}
+          onClick={() => {
+            setPreselect("all-original");
+            setExportOpen(true);
+          }}
+        />
+      )}
       <MobileTabBar token={token} favoritesCount={favoritesCount} />
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
         token={token}
         options={options}
+        preselect={preselect}
       />
     </>
   );

@@ -56,7 +56,7 @@ test.describe("favorites tab", () => {
     ).toBeVisible();
   });
 
-  test("glass dock is hidden when no favorites exist", async ({
+  test("favorites dock is hidden when no favorites exist; save-all dock takes its place", async ({
     page,
     context,
   }) => {
@@ -65,8 +65,13 @@ test.describe("favorites tab", () => {
     await expect(
       page.getByRole("heading", { name: "E2E Demo Album" }),
     ).toBeVisible();
+    // The favorites-export CTA is gone…
     await expect(
       page.getByRole("button", { name: /export favorites/i }),
     ).toHaveCount(0);
+    // …and a Save all CTA is offered instead (downloadable share link).
+    await expect(
+      page.getByRole("button", { name: /save all/i }),
+    ).toBeVisible();
   });
 });
