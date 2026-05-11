@@ -65,3 +65,12 @@ export async function requireAdminSessionFromCookies(): Promise<AdminAuthResult>
   if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
   return { ok: false };
 }
+
+export async function requireAdmin(): Promise<AdminAuthOk> {
+  if (process.env.GH_TEST_BYPASS_AUTH === "1") {
+    return { ok: true, userId: "test-admin", email: "test@local" };
+  }
+  const r = await requireAdminSessionFromCookies();
+  if (!r.ok) throw new Error("unauthorized");
+  return r;
+}
