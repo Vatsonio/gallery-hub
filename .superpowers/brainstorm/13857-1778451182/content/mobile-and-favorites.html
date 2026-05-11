@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mobile grid + favorites + export</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; margin: 0; padding: 32px; }
+  h2 { font-size: 1.6em; margin: 0 0 8px; font-weight: 500; }
+  .subtitle { color: #888; margin: 0 0 32px; }
+  h3 { font-size: 1em; font-weight: 500; color: #fff; margin: 0 0 12px; letter-spacing: 0.05em; }
+  .label { color: #888; font-size: 0.7em; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 6px; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 24px; max-width: 1500px; margin: 0 auto 32px; }
+  @media (max-width: 1100px) { .row { grid-template-columns: 1fr; } }
+
+  .panel { background: #111; border: 1px solid #222; border-radius: 12px; padding: 20px; }
+  .panel-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+
+  /* phone */
+  .phone { width: 280px; height: 580px; background: #000; border-radius: 38px; padding: 8px; box-shadow: 0 0 0 2px #1a1a1a, 0 20px 60px rgba(0,0,0,0.5); margin: 0 auto; position: relative; }
+  .phone-notch { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); width: 90px; height: 22px; background: #000; border-radius: 12px; z-index: 10; }
+  .phone-screen { width: 100%; height: 100%; background: #0d0d0d; border-radius: 32px; overflow: hidden; position: relative; color: #fff; }
+
+  /* Mobile header */
+  .m-header { padding: 44px 16px 12px; }
+  .m-back { font-size: 0.75em; color: #aaa; letter-spacing: 0.1em; margin-bottom: 4px; }
+  .m-title { font-size: 1.1em; font-weight: 400; letter-spacing: -0.01em; }
+  .m-meta { font-size: 0.7em; color: #888; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 4px; }
+
+  /* Mobile grid — B1 justified, 2 columns */
+  .m-grid { padding: 4px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 420px; }
+  .m-row { display: flex; gap: 4px; height: 120px; }
+  .m-row > div { background-size: cover; background-position: center; position: relative; }
+  .m-row > div .h { position: absolute; top: 8px; right: 8px; color: #fff; font-size: 14px; opacity: 0.7; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+  .m-row > div .h.on { color: #ff4d6d; opacity: 1; }
+
+  /* Mobile tabbar */
+  .m-tabbar { position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 0 20px; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); display: flex; justify-content: space-around; border-top: 1px solid #1a1a1a; }
+  .m-tab { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #888; font-size: 0.65em; }
+  .m-tab.active { color: #fff; }
+  .m-tab .ic { font-size: 18px; }
+
+  /* Favorites view variant */
+  .fav-cta { position: absolute; bottom: 90px; left: 16px; right: 16px; padding: 14px; background: #fff; color: #000; border-radius: 12px; font-size: 0.85em; font-weight: 500; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .fav-cta .sub { font-size: 0.75em; opacity: 0.6; margin-top: 2px; font-weight: 400; }
+
+  /* Desktop favorites view */
+  .desk-frame { aspect-ratio: 16/10; background: #0d0d0d; border-radius: 8px; overflow: hidden; border: 1px solid #1a1a1a; position: relative; }
+  .desk-header { padding: 18px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1a1a1a; }
+  .desk-brand { font-size: 0.85em; color: #aaa; letter-spacing: 0.2em; }
+  .desk-title-block { text-align: center; }
+  .desk-title { font-size: 1.2em; font-weight: 400; }
+  .desk-tabs { display: flex; gap: 4px; }
+  .desk-tab { padding: 6px 14px; border-radius: 99px; font-size: 0.75em; color: #aaa; cursor: pointer; }
+  .desk-tab.active { background: rgba(255,77,109,0.15); color: #ff4d6d; }
+  .desk-action { padding: 8px 18px; background: #fff; color: #000; border-radius: 99px; font-size: 0.75em; font-weight: 500; cursor: pointer; }
+  .desk-action.outline { background: transparent; border: 1px solid #333; color: #fff; }
+
+  /* B1 justified rows on desktop, favorites only (3 photos) */
+  .desk-grid { padding: 12px; }
+  .desk-row { display: flex; gap: 4px; height: 200px; margin-bottom: 4px; }
+  .desk-row > div { background-size: cover; background-position: center; position: relative; }
+  .desk-row > div .h { position: absolute; top: 10px; right: 10px; color: #ff4d6d; font-size: 18px; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+
+  .desk-empty-hint { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.05); padding: 10px 18px; border-radius: 99px; font-size: 0.78em; color: #aaa; backdrop-filter: blur(8px); }
+
+  /* Export modal */
+  .modal-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; }
+  .modal { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px; padding: 28px; width: 360px; }
+  .modal h4 { margin: 0 0 6px; font-size: 1.1em; }
+  .modal p { margin: 0 0 20px; color: #aaa; font-size: 0.85em; }
+  .modal-option { padding: 14px 16px; border: 1px solid #2a2a2a; border-radius: 10px; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; }
+  .modal-option:hover { border-color: #555; }
+  .modal-option.sel { border-color: #fff; background: rgba(255,255,255,0.04); }
+  .modal-option .opt-title { font-size: 0.9em; }
+  .modal-option .opt-sub { font-size: 0.72em; color: #888; margin-top: 2px; }
+  .modal-option .opt-size { font-size: 0.75em; color: #888; }
+  .modal-btn { width: 100%; padding: 12px; background: #fff; color: #000; border-radius: 10px; font-weight: 500; text-align: center; margin-top: 12px; cursor: pointer; font-size: 0.9em; }
+
+  /* Photos */
+  .p1 { background-image: url('https://images.unsplash.com/photo-1519741497674-611481863552?w=600&q=80'); }
+  .p2 { background-image: url('https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=600&q=80'); }
+  .p3 { background-image: url('https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=600&q=80'); }
+  .p4 { background-image: url('https://images.unsplash.com/photo-1525772764200-be829a350797?w=600&q=80'); }
+  .p5 { background-image: url('https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=600&q=80'); }
+  .p6 { background-image: url('https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=600&q=80'); }
+  .p7 { background-image: url('https://images.unsplash.com/photo-1591604466107-ec97de577aff?w=600&q=80'); }
+  .p8 { background-image: url('https://images.unsplash.com/photo-1537907510278-10acdb198d0f?w=600&q=80'); }
+  .p9 { background-image: url('https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=600&q=80'); }
+  .p10 { background-image: url('https://images.unsplash.com/photo-1525258946800-98cfd641d0de?w=600&q=80'); }
+  .p11 { background-image: url('https://images.unsplash.com/photo-1469371670807-013ccf25f16a?w=600&q=80'); }
+
+  .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 24px auto 0; max-width: 1500px; }
+  .option { padding: 16px 20px; border: 1px solid #222; border-radius: 10px; background: #111; cursor: pointer; }
+  .option:hover { border-color: #555; }
+  .option.selected { border-color: #fff; box-shadow: 0 0 0 2px #fff; }
+  .option h4 { margin: 0 0 4px; font-size: 0.95em; }
+  .option p { margin: 0; font-size: 0.82em; color: #888; }
+</style>
+</head>
+<body>
+  <h2>Мобільна сітка · Favorites · Export</h2>
+  <p class="subtitle">B1 justified rows адаптується під мобільний як 2 колонки. Favorites — окрема вкладка з тими ж фото, тільки лайкані. Export — модалка з вибором: всі / тільки лайкані, розмір.</p>
+
+  <div class="row">
+
+    <!-- Mobile: all photos -->
+    <div class="panel">
+      <div class="panel-header"><div class="label">Mobile · Усі фото</div></div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="m-header">
+            <div class="m-back">‹ gallery</div>
+            <div class="m-title">Anna & Oleh</div>
+            <div class="m-meta">42 photos · 3 favorites</div>
+          </div>
+          <div class="m-grid">
+            <div class="m-row">
+              <div class="p1" style="flex: 1.5"><span class="h on">♥</span></div>
+              <div class="p2" style="flex: 1"><span class="h">♡</span></div>
+            </div>
+            <div class="m-row">
+              <div class="p3" style="flex: 0.8"><span class="h">♡</span></div>
+              <div class="p4" style="flex: 1.4"><span class="h on">♥</span></div>
+            </div>
+            <div class="m-row">
+              <div class="p5" style="flex: 1.3"><span class="h">♡</span></div>
+              <div class="p6" style="flex: 0.9"><span class="h">♡</span></div>
+            </div>
+            <div class="m-row">
+              <div class="p7" style="flex: 1"><span class="h on">♥</span></div>
+              <div class="p8" style="flex: 1.2"><span class="h">♡</span></div>
+            </div>
+            <div class="m-row">
+              <div class="p9" style="flex: 1.4"><span class="h">♡</span></div>
+              <div class="p10" style="flex: 0.7"><span class="h">♡</span></div>
+            </div>
+          </div>
+          <div class="m-tabbar">
+            <div class="m-tab active"><div class="ic">▦</div><span>All</span></div>
+            <div class="m-tab"><div class="ic">♥</div><span>Favorites</span></div>
+            <div class="m-tab"><div class="ic">↓</div><span>Export</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile: favorites view -->
+    <div class="panel">
+      <div class="panel-header"><div class="label">Mobile · Favorites tab</div></div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="m-header">
+            <div class="m-back">‹ Anna & Oleh</div>
+            <div class="m-title">Favorites</div>
+            <div class="m-meta">3 selected</div>
+          </div>
+          <div class="m-grid">
+            <div class="m-row">
+              <div class="p1" style="flex: 1.5"><span class="h on">♥</span></div>
+              <div class="p4" style="flex: 1"><span class="h on">♥</span></div>
+            </div>
+            <div class="m-row" style="height:160px">
+              <div class="p7" style="flex: 1"><span class="h on">♥</span></div>
+            </div>
+          </div>
+          <div class="fav-cta">
+            ↓ Export favorites (3)
+            <div class="sub">~24 MB · ZIP archive</div>
+          </div>
+          <div class="m-tabbar">
+            <div class="m-tab"><div class="ic">▦</div><span>All</span></div>
+            <div class="m-tab active"><div class="ic">♥</div><span>Favorites</span></div>
+            <div class="m-tab"><div class="ic">↓</div><span>Export</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Desktop: favorites + export modal -->
+    <div class="panel">
+      <div class="panel-header"><div class="label">Desktop · Favorites + Export modal</div></div>
+      <div class="desk-frame">
+        <div class="desk-header">
+          <div class="desk-brand">gallery.divass.space</div>
+          <div class="desk-title-block">
+            <div class="desk-title">Anna & Oleh</div>
+            <div style="font-size:0.65em;color:#888;letter-spacing:0.15em;margin-top:2px">WEDDING · OCT 2026</div>
+          </div>
+          <div class="desk-tabs">
+            <div class="desk-tab">All (42)</div>
+            <div class="desk-tab active">♥ Favorites (3)</div>
+            <div class="desk-action">Export ↓</div>
+          </div>
+        </div>
+        <div class="desk-grid">
+          <div class="desk-row">
+            <div class="p1" style="flex: 1.5"><span class="h">♥</span></div>
+            <div class="p4" style="flex: 1"><span class="h">♥</span></div>
+            <div class="p7" style="flex: 1.2"><span class="h">♥</span></div>
+          </div>
+        </div>
+        <!-- Modal overlay -->
+        <div class="modal-overlay">
+          <div class="modal">
+            <h4>Export</h4>
+            <p>Що завантажити? Оригінали можуть займати багато місця.</p>
+            <div class="modal-option">
+              <div>
+                <div class="opt-title">Тільки favorites</div>
+                <div class="opt-sub">3 photos · оригінали</div>
+              </div>
+              <div class="opt-size">~24 MB</div>
+            </div>
+            <div class="modal-option sel">
+              <div>
+                <div class="opt-title">Весь альбом · web-розмір</div>
+                <div class="opt-sub">42 photos · 2400px макс</div>
+              </div>
+              <div class="opt-size">~80 MB</div>
+            </div>
+            <div class="modal-option">
+              <div>
+                <div class="opt-title">Весь альбом · оригінали</div>
+                <div class="opt-sub">42 photos · повна якість</div>
+              </div>
+              <div class="opt-size">~620 MB</div>
+            </div>
+            <div class="modal-btn">Download ZIP</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="options">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+      <h4>Все ок, далі</h4>
+      <p>Mobile grid + favorites + export — підходить. Йдемо до адмінки.</p>
+    </div>
+    <div class="option" data-choice="no-tabbar" onclick="toggleSelect(this)">
+      <h4>Не хочу bottom tabbar</h4>
+      <p>Звичайний скрол, без вкладок. Export — sticky button зверху або плаваюча кнопка.</p>
+    </div>
+    <div class="option" data-choice="other" onclick="toggleSelect(this)">
+      <h4>Інше — напишу в терміналі</h4>
+      <p>Хочу інакше (опишу що)</p>
+    </div>
+  </div>
+
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll('.option').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    const choice = el.dataset.choice;
+    const text = el.querySelector('h4').textContent;
+    fetch('/event', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'click', choice, text, timestamp: Date.now() }) });
+  }
+</script>
+</body>
+</html>

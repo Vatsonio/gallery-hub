@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Visual direction</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; margin: 0; padding: 32px; }
+  h2 { font-size: 1.6em; margin: 0 0 8px; font-weight: 500; }
+  .subtitle { color: #888; margin: 0 0 32px; }
+  .label { font-size: 0.7em; letter-spacing: 0.15em; text-transform: uppercase; color: #888; }
+
+  .deck { display: grid; grid-template-columns: 1fr; gap: 24px; max-width: 1400px; margin: 0 auto; }
+
+  .card { border: 1px solid #222; border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s; background: #111; }
+  .card:hover { border-color: #555; transform: translateY(-2px); }
+  .card.selected { border-color: #fff; box-shadow: 0 0 0 2px #fff; }
+  .card-header { padding: 16px 20px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+  .card-header h3 { margin: 0; font-size: 1.1em; }
+  .badge { font-size: 0.7em; padding: 4px 10px; border-radius: 99px; background: #222; color: #aaa; }
+  .card-desc { padding: 12px 20px 16px; font-size: 0.88em; color: #aaa; border-bottom: 1px solid #222; }
+  .preview { background: #000; padding: 24px; }
+
+  /* === Mockup A: Minimal Editorial (white, generous space) === */
+  .mock-a { background: #fafafa; color: #111; padding: 48px 56px; font-family: "Cormorant Garamond", Georgia, serif; }
+  .mock-a-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #ddd; padding-bottom: 24px; margin-bottom: 36px; }
+  .mock-a-title { font-size: 2.2em; font-weight: 400; letter-spacing: 0.02em; }
+  .mock-a-meta { font-size: 0.75em; color: #888; letter-spacing: 0.15em; text-transform: uppercase; font-family: -apple-system, sans-serif; }
+  .mock-a-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .mock-a-photo { aspect-ratio: 3/4; border-radius: 2px; background-size: cover; background-position: center; position: relative; }
+  .mock-a-photo.wide { aspect-ratio: 3/2; grid-column: span 2; }
+  .mock-a-heart { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; background: rgba(255,255,255,0.9); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+  /* === Mockup B: Dark Cinematic (Format/Squarespace-style) === */
+  .mock-b { background: #0d0d0d; color: #fff; padding: 0; }
+  .mock-b-hero { aspect-ratio: 21/9; background-size: cover; background-position: center; position: relative; display: flex; align-items: flex-end; padding: 32px; }
+  .mock-b-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.8)); }
+  .mock-b-title-block { position: relative; z-index: 1; }
+  .mock-b-title { font-size: 2em; font-weight: 300; letter-spacing: -0.01em; margin: 0; }
+  .mock-b-sub { font-size: 0.8em; color: #aaa; letter-spacing: 0.2em; text-transform: uppercase; margin-top: 8px; }
+  .mock-b-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; }
+  .mock-b-photo { aspect-ratio: 1/1; background-size: cover; background-position: center; position: relative; cursor: pointer; }
+  .mock-b-photo:hover::after { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,0.3); }
+  .mock-b-heart { position: absolute; top: 10px; right: 10px; color: #fff; font-size: 18px; opacity: 0.6; }
+  .mock-b-heart.on { color: #ff4d6d; opacity: 1; }
+
+  /* === Mockup C: Masonry / Pinterest === */
+  .mock-c { background: #1a1a1a; color: #fff; padding: 24px; }
+  .mock-c-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+  .mock-c-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #ff6b6b, #feca57); }
+  .mock-c-title { font-size: 1.4em; font-weight: 600; margin: 0; }
+  .mock-c-meta { font-size: 0.8em; color: #888; }
+  .mock-c-actions { margin-left: auto; display: flex; gap: 8px; }
+  .mock-c-btn { padding: 8px 16px; border-radius: 99px; background: #2a2a2a; color: #fff; font-size: 0.8em; }
+  .mock-c-btn.primary { background: #fff; color: #000; }
+  .mock-c-masonry { columns: 4; column-gap: 8px; }
+  .mock-c-photo { display: block; width: 100%; margin-bottom: 8px; border-radius: 8px; background-size: cover; background-position: center; break-inside: avoid; }
+  .mock-c-photo.h1 { aspect-ratio: 3/4; }
+  .mock-c-photo.h2 { aspect-ratio: 2/3; }
+  .mock-c-photo.h3 { aspect-ratio: 1/1; }
+  .mock-c-photo.h4 { aspect-ratio: 4/5; }
+
+  /* Photo URLs (Unsplash demo) */
+  .p1 { background-image: url('https://images.unsplash.com/photo-1519741497674-611481863552?w=600&q=80'); }
+  .p2 { background-image: url('https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=600&q=80'); }
+  .p3 { background-image: url('https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=600&q=80'); }
+  .p4 { background-image: url('https://images.unsplash.com/photo-1525772764200-be829a350797?w=600&q=80'); }
+  .p5 { background-image: url('https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=600&q=80'); }
+  .p6 { background-image: url('https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=600&q=80'); }
+  .p7 { background-image: url('https://images.unsplash.com/photo-1591604466107-ec97de577aff?w=600&q=80'); }
+  .p8 { background-image: url('https://images.unsplash.com/photo-1537907510278-10acdb198d0f?w=600&q=80'); }
+  .p9 { background-image: url('https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=600&q=80'); }
+  .p10 { background-image: url('https://images.unsplash.com/photo-1525258946800-98cfd641d0de?w=600&q=80'); }
+  .p11 { background-image: url('https://images.unsplash.com/photo-1469371670807-013ccf25f16a?w=600&q=80'); }
+  .p12 { background-image: url('https://images.unsplash.com/photo-1546069901-d5bfd2cbfb1f?w=400&q=80'); }
+</style>
+</head>
+<body>
+  <h2>Який візуальний напрямок?</h2>
+  <p class="subtitle">Те, що клієнт відкриває по лінку. Mockups з реальними фото — обери естетику, яка тобі найближча. Можна потім крутити деталі.</p>
+
+  <div class="deck">
+
+    <!-- A: Minimal Editorial -->
+    <div class="card" data-choice="a" onclick="toggleSelect(this)">
+      <div class="card-header">
+        <h3>A — Editorial Minimal</h3>
+        <span class="badge">Світла • Serif • Простір</span>
+      </div>
+      <div class="card-desc">Біле тло, generous whitespace, serif-шрифт, фото як арт-обʼєкти. Типу друкований альбом. Орієнтир: Format, Pixieset, Squarespace.</div>
+      <div class="preview">
+        <div class="mock-a">
+          <div class="mock-a-header">
+            <div class="mock-a-title">Wedding · Anna & Oleh</div>
+            <div class="mock-a-meta">42 photos · 3 selected</div>
+          </div>
+          <div class="mock-a-grid">
+            <div class="mock-a-photo wide p1"><div class="mock-a-heart">♡</div></div>
+            <div class="mock-a-photo p2"><div class="mock-a-heart" style="background:#ff4d6d;color:#fff;">♥</div></div>
+            <div class="mock-a-photo p3"><div class="mock-a-heart">♡</div></div>
+            <div class="mock-a-photo p4"><div class="mock-a-heart">♡</div></div>
+            <div class="mock-a-photo wide p5"><div class="mock-a-heart" style="background:#ff4d6d;color:#fff;">♥</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B: Dark Cinematic -->
+    <div class="card" data-choice="b" onclick="toggleSelect(this)">
+      <div class="card-header">
+        <h3>B — Dark Cinematic</h3>
+        <span class="badge">Темна • Hero • Сітка</span>
+      </div>
+      <div class="card-desc">Чорне тло, великий hero-кадр зверху, щільна сітка квадратів. Фото "світяться". Орієнтир: Behance, Vimeo, fotografer-портфоліо.</div>
+      <div class="preview">
+        <div class="mock-b">
+          <div class="mock-b-hero p6">
+            <div class="mock-b-title-block">
+              <h1 class="mock-b-title">Anna & Oleh</h1>
+              <div class="mock-b-sub">Wedding · October 2026</div>
+            </div>
+          </div>
+          <div class="mock-b-grid">
+            <div class="mock-b-photo p7"><span class="mock-b-heart on">♥</span></div>
+            <div class="mock-b-photo p8"><span class="mock-b-heart">♡</span></div>
+            <div class="mock-b-photo p9"><span class="mock-b-heart">♡</span></div>
+            <div class="mock-b-photo p10"><span class="mock-b-heart on">♥</span></div>
+            <div class="mock-b-photo p11"><span class="mock-b-heart">♡</span></div>
+            <div class="mock-b-photo p1"><span class="mock-b-heart">♡</span></div>
+            <div class="mock-b-photo p2"><span class="mock-b-heart on">♥</span></div>
+            <div class="mock-b-photo p3"><span class="mock-b-heart">♡</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C: Masonry -->
+    <div class="card" data-choice="c" onclick="toggleSelect(this)">
+      <div class="card-header">
+        <h3>C — Masonry Modern</h3>
+        <span class="badge">Темна • Pinterest • Динамічна</span>
+      </div>
+      <div class="card-desc">Різновисока masonry-сітка, без обрізки фото — кожне в своєму aspect ratio. Header з аватаром і CTA-кнопками. Орієнтир: Pinterest, Unsplash, сучасні портфоліо.</div>
+      <div class="preview">
+        <div class="mock-c">
+          <div class="mock-c-header">
+            <div class="mock-c-avatar"></div>
+            <div>
+              <h3 class="mock-c-title">Anna & Oleh — Wedding</h3>
+              <div class="mock-c-meta">42 photos · 3 favorites</div>
+            </div>
+            <div class="mock-c-actions">
+              <span class="mock-c-btn">Download all</span>
+              <span class="mock-c-btn primary">View favorites</span>
+            </div>
+          </div>
+          <div class="mock-c-masonry">
+            <div class="mock-c-photo h1 p4"></div>
+            <div class="mock-c-photo h2 p5"></div>
+            <div class="mock-c-photo h3 p6"></div>
+            <div class="mock-c-photo h4 p7"></div>
+            <div class="mock-c-photo h2 p8"></div>
+            <div class="mock-c-photo h1 p9"></div>
+            <div class="mock-c-photo h4 p10"></div>
+            <div class="mock-c-photo h3 p11"></div>
+            <div class="mock-c-photo h2 p1"></div>
+            <div class="mock-c-photo h1 p2"></div>
+            <div class="mock-c-photo h3 p3"></div>
+            <div class="mock-c-photo h4 p12"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    const choice = el.dataset.choice;
+    const text = el.querySelector('h3').textContent;
+    fetch('/event', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'click', choice, text, timestamp: Date.now() }) });
+  }
+</script>
+</body>
+</html>

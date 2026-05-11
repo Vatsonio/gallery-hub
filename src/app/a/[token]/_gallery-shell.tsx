@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { FileImage, Heart, ImageIcon } from "lucide-react";
+// FileImage is used in both the export-modal options list and the footer
+// save-all button below.
 import MobileTabBar from "@/components/gallery/MobileTabBar";
 import GlassDock from "@/components/gallery/GlassDock";
 import ExportModal, {
@@ -106,16 +108,37 @@ export default function GalleryShell({
     [exportSizes],
   );
 
-  // Decide which dock to show. Favorites win when the viewer has any
-  // hearted photos; otherwise fall back to a "Save all" CTA so the user
-  // can grab the whole album without picking favorites first.
+  // The floating dock is only used for the favorites CTA. "Save all"
+  // lives in the page footer at the bottom of the scroll — less intrusive
+  // and aligns with the user's mental model that the whole-album download
+  // is a low-frequency, end-of-page action.
   const showFavoritesDock = favoritesCount > 0;
-  const showSaveAllDock =
-    !showFavoritesDock && exportSizes.totalCount > 0;
+  const showSaveAllFooter = exportSizes.totalCount > 0;
 
   return (
     <>
       {children}
+      {showSaveAllFooter && (
+        <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">
+          <button
+            type="button"
+            onClick={() => {
+              setPreselect("all-original");
+              setExportOpen(true);
+            }}
+            className="group inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/90 backdrop-blur hover:border-white/20 hover:bg-white/[0.08] transition cursor-pointer"
+          >
+            <FileImage className="h-4 w-4 text-white/70 group-hover:text-white transition" />
+            <span>Save all</span>
+            <span className="text-white/50">
+              {exportSizes.totalCount} photo{exportSizes.totalCount === 1 ? "" : "s"}
+            </span>
+          </button>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-white/25">
+            gallery.divass.space
+          </span>
+        </footer>
+      )}
       {showFavoritesDock && (
         <GlassDock
           variant="favorites"
@@ -127,20 +150,10 @@ export default function GalleryShell({
           }}
         />
       )}
-      {showSaveAllDock && (
-        <GlassDock
-          variant="save-all"
-          count={exportSizes.totalCount}
-          onClick={() => {
-            setPreselect("all-original");
-            setExportOpen(true);
-          }}
-        />
-      )}
       <MobileTabBar
         token={token}
         favoritesCount={favoritesCount}
-        liftForDock={showFavoritesDock || showSaveAllDock}
+        liftForDock={showFavoritesDock}
       />
       <ExportModal
         open={exportOpen}

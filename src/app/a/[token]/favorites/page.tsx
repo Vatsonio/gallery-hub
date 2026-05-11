@@ -136,7 +136,7 @@ export default async function FavoritesPage({ params }: Props) {
       <Header token={token} count={favIds.length} />
       <div className="mx-auto max-w-screen-2xl">
         {/* Mobile */}
-        <div className="sm:hidden flex flex-col gap-0.5 px-0.5 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+9rem)]">
+        <div className="sm:hidden flex flex-col gap-0.5 px-0.5">
           {mobileRows.map((row, i) => {
             const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
             return (
@@ -162,7 +162,7 @@ export default async function FavoritesPage({ params }: Props) {
           })}
         </div>
         {/* Desktop */}
-        <div className="hidden sm:flex flex-col gap-1 px-1 py-4 pb-32">
+        <div className="hidden sm:flex flex-col gap-1 px-1 py-4">
           {desktopRows.map((row, i) => {
             const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
             return (

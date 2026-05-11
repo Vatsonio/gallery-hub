@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lightbox viewer — PC + mobile</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; margin: 0; padding: 32px; }
+  h2 { font-size: 1.6em; margin: 0 0 8px; font-weight: 500; }
+  .subtitle { color: #888; margin: 0 0 32px; }
+  .hint { color: #ffb84d; font-size: 0.85em; margin-bottom: 16px; }
+
+  .split { display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 1000px) { .split { grid-template-columns: 1fr; } }
+
+  .frame { border: 1px solid #222; border-radius: 12px; overflow: hidden; background: #111; }
+  .frame-header { padding: 12px 18px; border-bottom: 1px solid #222; display: flex; justify-content: space-between; font-size: 0.85em; color: #aaa; }
+  .frame-header .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#444; margin-right:4px; }
+  .frame-header .dot.r{background:#ff5f56}.frame-header .dot.y{background:#ffbd2e}.frame-header .dot.g{background:#27c93f}
+
+  /* ============= DESKTOP LIGHTBOX ============= */
+  .desktop { aspect-ratio: 16/10; background: #000; position: relative; overflow: hidden; }
+  .lightbox-photo { position: absolute; inset: 0; background-image: url('https://images.unsplash.com/photo-1519741497674-611481863552?w=1600&q=85'); background-size: contain; background-position: center; background-repeat: no-repeat; cursor: pointer; }
+  .lb-topbar { position: absolute; top: 0; left: 0; right: 0; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 2; background: linear-gradient(180deg, rgba(0,0,0,0.6), transparent); }
+  .lb-title { font-size: 0.9em; color: #fff; }
+  .lb-title .name { opacity: 0.6; margin-right: 8px; }
+  .lb-actions { display: flex; gap: 8px; }
+  .lb-btn { width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.1); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; font-size: 16px; transition: background 0.2s; }
+  .lb-btn:hover { background: rgba(255,255,255,0.2); }
+  .lb-btn.liked { background: rgba(255,77,109,0.9); }
+  .lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; font-size: 22px; transition: all 0.2s; z-index: 2; }
+  .lb-arrow.left { left: 16px; } .lb-arrow.right { right: 16px; }
+  .lb-arrow:hover { background: rgba(0,0,0,0.7); }
+  .lb-bottombar { position: absolute; bottom: 0; left: 0; right: 0; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 2; background: linear-gradient(0deg, rgba(0,0,0,0.6), transparent); color: #fff; font-size: 0.8em; }
+  .lb-counter { letter-spacing: 0.15em; opacity: 0.8; }
+  .lb-filmstrip { display: flex; gap: 4px; opacity: 0.85; }
+  .lb-filmstrip > div { width: 36px; height: 28px; background-size: cover; background-position: center; border-radius: 2px; opacity: 0.5; }
+  .lb-filmstrip > div.active { opacity: 1; outline: 2px solid #fff; }
+  .heart-burst { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0); color: #ff4d6d; font-size: 120px; opacity: 0; pointer-events: none; filter: drop-shadow(0 4px 24px rgba(255,77,109,0.6)); animation: burst 0.9s ease-out 0.4s forwards; }
+  @keyframes burst {
+    0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+    20% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+    60% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(1.3); opacity: 0; }
+  }
+
+  /* ============= MOBILE LIGHTBOX (phone frame) ============= */
+  .phone { width: 280px; height: 580px; background: #000; border-radius: 38px; padding: 8px; box-shadow: 0 0 0 2px #1a1a1a, 0 20px 60px rgba(0,0,0,0.5); margin: 0 auto; position: relative; }
+  .phone-notch { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); width: 90px; height: 22px; background: #000; border-radius: 12px; z-index: 10; }
+  .phone-screen { width: 100%; height: 100%; background: #000; border-radius: 32px; overflow: hidden; position: relative; }
+  .m-photo { position: absolute; inset: 0; background-image: url('https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=600&q=85'); background-size: cover; background-position: center; }
+  .m-topbar { position: absolute; top: 0; left: 0; right: 0; padding: 50px 16px 12px; display: flex; justify-content: space-between; align-items: center; z-index: 2; background: linear-gradient(180deg, rgba(0,0,0,0.6), transparent); color: #fff; }
+  .m-close { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .m-counter { font-size: 0.75em; letter-spacing: 0.1em; opacity: 0.9; }
+  .m-bottombar { position: absolute; bottom: 0; left: 0; right: 0; padding: 16px 24px 32px; display: flex; justify-content: space-around; z-index: 2; background: linear-gradient(0deg, rgba(0,0,0,0.7), transparent); }
+  .m-action { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #fff; font-size: 0.7em; }
+  .m-action-icon { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; font-size: 18px; backdrop-filter: blur(8px); }
+  .m-action.liked .m-action-icon { background: #ff4d6d; }
+  .m-swipe-hint { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 0.65em; opacity: 0.5; letter-spacing: 0.15em; }
+  .m-heart-burst { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0); color: #ff4d6d; font-size: 80px; opacity: 0; pointer-events: none; filter: drop-shadow(0 4px 16px rgba(255,77,109,0.7)); animation: burst 0.9s ease-out 1s forwards; }
+
+  .legend { margin-top: 24px; background: #141414; border: 1px solid #222; border-radius: 12px; padding: 20px 24px; max-width: 1400px; margin: 24px auto 0; }
+  .legend h3 { margin: 0 0 12px; font-size: 1em; font-weight: 500; color: #fff; }
+  .legend ul { margin: 0; padding-left: 20px; color: #bbb; font-size: 0.88em; line-height: 1.7; }
+  .legend kbd { background: #2a2a2a; padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 0.85em; color: #fff; }
+  .legend .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) { .legend .grid2 { grid-template-columns: 1fr; } }
+
+  .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 24px auto 0; max-width: 1400px; }
+  .option { padding: 16px 20px; border: 1px solid #222; border-radius: 10px; background: #111; cursor: pointer; transition: all 0.2s; }
+  .option:hover { border-color: #555; }
+  .option.selected { border-color: #fff; box-shadow: 0 0 0 2px #fff; }
+  .option h4 { margin: 0 0 4px; font-size: 0.95em; }
+  .option p { margin: 0; font-size: 0.82em; color: #888; }
+</style>
+</head>
+<body>
+  <h2>Lightbox / Single-photo viewer</h2>
+  <p class="subtitle">Те, що відкривається коли клікаєш на фото в сітці. Зліва — десктоп, справа — мобільний. Серце "вибухне" через секунду в обох — це анімація double-tap like.</p>
+  <p class="hint">▸ Серце зʼявиться автоматично щоб показати анімацію lайку</p>
+
+  <div class="split">
+
+    <!-- DESKTOP -->
+    <div class="frame">
+      <div class="frame-header">
+        <span><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span> gallery.divass.space/a/Hk7eRq · Anna & Oleh</span>
+        <span>Desktop</span>
+      </div>
+      <div class="desktop">
+        <div class="lightbox-photo"></div>
+        <div class="lb-topbar">
+          <div class="lb-title"><span class="name">Anna & Oleh</span>· photo 12 of 42</div>
+          <div class="lb-actions">
+            <div class="lb-btn" title="Info">ⓘ</div>
+            <div class="lb-btn" title="Download">↓</div>
+            <div class="lb-btn liked" title="Liked">♥</div>
+            <div class="lb-btn" title="Close">✕</div>
+          </div>
+        </div>
+        <div class="lb-arrow left">‹</div>
+        <div class="lb-arrow right">›</div>
+        <div class="lb-bottombar">
+          <div class="lb-counter">12 / 42 · 3 liked</div>
+          <div class="lb-filmstrip">
+            <div style="background-image:url('https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=200')"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1525772764200-be829a350797?w=200')"></div>
+            <div class="active" style="background-image:url('https://images.unsplash.com/photo-1519741497674-611481863552?w=200')"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=200')"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=200')"></div>
+            <div style="background-image:url('https://images.unsplash.com/photo-1591604466107-ec97de577aff?w=200')"></div>
+          </div>
+        </div>
+        <div class="heart-burst">♥</div>
+      </div>
+    </div>
+
+    <!-- MOBILE -->
+    <div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="m-photo"></div>
+          <div class="m-topbar">
+            <div class="m-close">✕</div>
+            <div class="m-counter">12 / 42</div>
+            <div class="m-close">ⓘ</div>
+          </div>
+          <div class="m-swipe-hint">‹ swipe ›</div>
+          <div class="m-bottombar">
+            <div class="m-action liked">
+              <div class="m-action-icon">♥</div>
+              <span>liked</span>
+            </div>
+            <div class="m-action">
+              <div class="m-action-icon">↓</div>
+              <span>save</span>
+            </div>
+            <div class="m-action">
+              <div class="m-action-icon">⤴</div>
+              <span>share</span>
+            </div>
+          </div>
+          <div class="m-heart-burst">♥</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="grid2">
+      <div>
+        <h3>Desktop взаємодія</h3>
+        <ul>
+          <li><kbd>Double-click</kbd> на фото — лайк (з анімацією серця)</li>
+          <li><kbd>←</kbd> <kbd>→</kbd> або стрілки на екрані — навігація</li>
+          <li><kbd>L</kbd> — toggle like, <kbd>D</kbd> — download, <kbd>F</kbd> — favorites only</li>
+          <li><kbd>Esc</kbd> — закрити, повернутись до сітки</li>
+          <li>Click на фото — toggle UI (chrome) приховується для повного перегляду</li>
+          <li>Filmstrip знизу — швидка навігація між сусідніми кадрами</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Mobile взаємодія</h3>
+        <ul>
+          <li><kbd>Double-tap</kbd> — лайк (Instagram-style)</li>
+          <li><kbd>Swipe ‹ ›</kbd> — наступне/попереднє фото</li>
+          <li><kbd>Swipe ↓</kbd> — закрити (drag-to-dismiss)</li>
+          <li>Tap по фото — toggle UI (chrome зникає)</li>
+          <li>Pinch-zoom — масштабування фото</li>
+          <li>Bottom bar: лайк / download / share лінк на це фото</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="options">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+      <h4>Ок, так і робимо</h4>
+      <p>Все підходить, рухаємось далі до mobile grid + favorites view</p>
+    </div>
+    <div class="option" data-choice="filmstrip-off" onclick="toggleSelect(this)">
+      <h4>Прибери filmstrip знизу</h4>
+      <p>Лишити тільки лічильник, без preview-смужки</p>
+    </div>
+    <div class="option" data-choice="other" onclick="toggleSelect(this)">
+      <h4>Інше — напишу в терміналі</h4>
+      <p>Хочу щось переробити (напиши що)</p>
+    </div>
+  </div>
+
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll('.option').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    const choice = el.dataset.choice;
+    const text = el.querySelector('h4').textContent;
+    fetch('/event', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'click', choice, text, timestamp: Date.now() }) });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Admin UI</title>
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; margin: 0; padding: 32px; -webkit-font-smoothing: antialiased; }
+  h2 { font-size: 1.5em; margin: 0 0 8px; font-weight: 600; letter-spacing: -0.01em; }
+  .subtitle { color: #888; margin: 0 0 32px; font-size: 0.92em; }
+  .ic { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .ic-sm { width: 14px; height: 14px; }
+  .ic-lg { width: 20px; height: 20px; }
+
+  .wrap { max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+
+  /* Browser frame */
+  .frame { background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 12px; overflow: hidden; }
+  .frame-header { padding: 10px 16px; border-bottom: 1px solid #1a1a1a; display: flex; align-items: center; gap: 8px; font-size: 0.78em; color: #888; }
+  .dots { display:flex; gap:5px; margin-right: 8px; }
+  .dots span { width: 9px; height: 9px; border-radius: 50%; background: #2a2a2a; }
+  .dots span:nth-child(1){background:#ff5f56}.dots span:nth-child(2){background:#ffbd2e}.dots span:nth-child(3){background:#27c93f}
+  .url-bar { background: #1a1a1a; padding: 5px 12px; border-radius: 6px; flex: 1; font-family: monospace; font-size: 0.85em; color: #aaa; }
+
+  /* ===== Admin Layout (sidebar + main) ===== */
+  .admin { display: grid; grid-template-columns: 240px 1fr; min-height: 700px; }
+  .sidebar { background: #080808; border-right: 1px solid #1a1a1a; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; }
+  .sb-brand { padding: 4px 12px 24px; display: flex; align-items: center; gap: 10px; }
+  .sb-logo { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #ff4d6d, #c9184a); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.95em; }
+  .sb-name { font-weight: 600; font-size: 0.95em; letter-spacing: -0.01em; }
+  .sb-name .sub { display: block; font-size: 0.65em; color: #666; font-weight: 400; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 1px; }
+  .sb-section { font-size: 0.65em; color: #555; letter-spacing: 0.2em; text-transform: uppercase; padding: 14px 12px 6px; font-weight: 500; }
+  .sb-item { padding: 8px 12px; border-radius: 8px; display: flex; align-items: center; gap: 10px; color: #999; font-size: 0.88em; cursor: pointer; }
+  .sb-item:hover { background: #141414; color: #fff; }
+  .sb-item.active { background: #1a1a1a; color: #fff; }
+  .sb-item .count { margin-left: auto; font-size: 0.75em; color: #666; }
+  .sb-spacer { flex: 1; }
+  .sb-account { padding: 12px; border: 1px solid #1a1a1a; border-radius: 10px; display: flex; align-items: center; gap: 10px; }
+  .sb-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+  .sb-user { font-size: 0.82em; font-weight: 500; }
+  .sb-user .em { display: block; font-size: 0.7em; color: #666; font-weight: 400; }
+
+  .main { padding: 28px 32px; overflow: hidden; }
+
+  /* ===== Screen 1: Albums dashboard ===== */
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .topbar h3 { margin: 0; font-size: 1.5em; font-weight: 600; letter-spacing: -0.02em; }
+  .topbar .sub { font-size: 0.85em; color: #888; margin-top: 2px; }
+  .btn-primary { background: #fff; color: #000; padding: 9px 14px; border-radius: 10px; font-size: 0.85em; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s; letter-spacing: -0.005em; }
+  .btn-primary:hover { background: #eee; }
+  .btn-ghost { padding: 9px 14px; border-radius: 10px; font-size: 0.85em; font-weight: 500; color: #aaa; border: 1px solid #1a1a1a; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .btn-ghost:hover { background: #141414; color: #fff; }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 20px; align-items: center; }
+  .search { flex: 1; max-width: 320px; background: #0f0f0f; border: 1px solid #1a1a1a; border-radius: 10px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+  .search input { background: none; border: 0; color: #ccc; flex: 1; font-size: 0.85em; outline: none; font-family: inherit; }
+  .chip { padding: 6px 12px; border-radius: 99px; font-size: 0.75em; color: #888; border: 1px solid #1a1a1a; cursor: pointer; }
+  .chip.active { background: #1a1a1a; color: #fff; border-color: #2a2a2a; }
+
+  .albums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .album { background: #0f0f0f; border: 1px solid #1a1a1a; border-radius: 14px; overflow: hidden; cursor: pointer; transition: all 0.2s; }
+  .album:hover { border-color: #2a2a2a; transform: translateY(-2px); }
+  .album-cover { aspect-ratio: 3/2; background-size: cover; background-position: center; position: relative; }
+  .album-badge { position: absolute; top: 10px; left: 10px; padding: 4px 10px; border-radius: 99px; font-size: 0.7em; font-weight: 600; backdrop-filter: blur(8px); }
+  .album-badge.private { background: rgba(0,0,0,0.6); color: #fff; }
+  .album-badge.public { background: rgba(34, 197, 94, 0.85); color: #fff; }
+  .album-badge.draft { background: rgba(255,255,255,0.15); color: #fff; }
+  .album-meta-overlay { position: absolute; bottom: 0; left: 0; right: 0; padding: 24px 12px 10px; background: linear-gradient(0deg, rgba(0,0,0,0.85), transparent); display: flex; gap: 10px; color: #fff; font-size: 0.72em; }
+  .album-meta-overlay .stat { display: flex; align-items: center; gap: 4px; }
+  .album-meta-overlay .stat svg { width: 12px; height: 12px; }
+  .album-body { padding: 14px 16px; }
+  .album-title { font-size: 1em; font-weight: 600; letter-spacing: -0.01em; }
+  .album-date { font-size: 0.75em; color: #666; margin-top: 2px; letter-spacing: 0.02em; }
+
+  /* New album card */
+  .album.new { border-style: dashed; border-color: #2a2a2a; display: flex; align-items: center; justify-content: center; aspect-ratio: 1/0.62; flex-direction: column; gap: 8px; color: #666; }
+  .album.new:hover { border-color: #555; color: #fff; }
+  .album.new .ic-lg { width: 28px; height: 28px; }
+
+  /* ===== Screen 2: Album detail (upload + manage) ===== */
+  .breadcrumb { font-size: 0.78em; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .breadcrumb a { color: #aaa; }
+  .album-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .album-toolbar .grow { flex: 1; }
+
+  /* Share link card */
+  .share-card { background: linear-gradient(135deg, #1a0c12 0%, #0d0d0d 100%); border: 1px solid rgba(255, 77, 109, 0.2); border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; display: flex; gap: 16px; align-items: center; }
+  .share-icon { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #ff4d6d, #c9184a); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 16px rgba(255,77,109,0.3); }
+  .share-info { flex: 1; min-width: 0; }
+  .share-label { font-size: 0.7em; color: #ff4d6d; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+  .share-url { font-family: monospace; font-size: 0.88em; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .share-meta { font-size: 0.75em; color: #888; margin-top: 6px; display: flex; gap: 14px; }
+  .share-meta .item { display: flex; align-items: center; gap: 4px; }
+  .share-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .icon-btn { width: 36px; height: 36px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid #1a1a1a; display: flex; align-items: center; justify-content: center; color: #aaa; cursor: pointer; }
+  .icon-btn:hover { background: #1a1a1a; color: #fff; }
+
+  /* Stats strip */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px; }
+  .stat-card { background: #0f0f0f; border: 1px solid #1a1a1a; border-radius: 12px; padding: 14px 16px; }
+  .stat-label { font-size: 0.7em; color: #666; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 500; }
+  .stat-value { font-size: 1.6em; font-weight: 600; letter-spacing: -0.02em; margin-top: 4px; line-height: 1.1; }
+  .stat-value .pink { color: #ff4d6d; }
+  .stat-sub { font-size: 0.72em; color: #888; margin-top: 2px; }
+
+  /* Photo manage grid */
+  .manage-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .manage-header h4 { margin: 0; font-size: 1.05em; font-weight: 600; }
+  .photo-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .photo-tile { aspect-ratio: 1/1; background-size: cover; background-position: center; border-radius: 6px; position: relative; cursor: pointer; }
+  .photo-tile:hover { box-shadow: 0 0 0 2px #ff4d6d; }
+  .photo-tile .liked-pill { position: absolute; top: 6px; left: 6px; background: #ff4d6d; color: #fff; padding: 2px 6px; border-radius: 99px; font-size: 0.65em; font-weight: 600; display: flex; align-items: center; gap: 3px; }
+  .photo-tile .liked-pill svg { width: 9px; height: 9px; }
+  .photo-tile.cover .cover-badge { position: absolute; bottom: 6px; left: 6px; background: #fff; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 0.6em; font-weight: 700; letter-spacing: 0.05em; }
+  .photo-tile.upload-tile { border: 2px dashed #2a2a2a; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #666; background: #0a0a0a; }
+
+  /* Photos */
+  .p1 { background-image: url('https://images.unsplash.com/photo-1519741497674-611481863552?w=400&q=80'); }
+  .p2 { background-image: url('https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=400&q=80'); }
+  .p3 { background-image: url('https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=400&q=80'); }
+  .p4 { background-image: url('https://images.unsplash.com/photo-1525772764200-be829a350797?w=400&q=80'); }
+  .p5 { background-image: url('https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=400&q=80'); }
+  .p6 { background-image: url('https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=400&q=80'); }
+  .p7 { background-image: url('https://images.unsplash.com/photo-1591604466107-ec97de577aff?w=400&q=80'); }
+  .p8 { background-image: url('https://images.unsplash.com/photo-1537907510278-10acdb198d0f?w=400&q=80'); }
+  .p9 { background-image: url('https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=400&q=80'); }
+  .p10 { background-image: url('https://images.unsplash.com/photo-1525258946800-98cfd641d0de?w=400&q=80'); }
+  .p11 { background-image: url('https://images.unsplash.com/photo-1469371670807-013ccf25f16a?w=400&q=80'); }
+  .p12 { background-image: url('https://images.unsplash.com/photo-1546069901-d5bfd2cbfb1f?w=400&q=80'); }
+
+  .screen-title { font-size: 0.7em; color: #555; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 8px; font-weight: 600; }
+
+  .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px; }
+  .option { padding: 16px 20px; border: 1px solid #1a1a1a; border-radius: 14px; background: #0f0f0f; cursor: pointer; transition: all 0.2s; }
+  .option:hover { border-color: #2a2a2a; }
+  .option.selected { border-color: #fff; box-shadow: 0 0 0 1px #fff; }
+  .option h4 { margin: 0 0 4px; font-size: 0.92em; font-weight: 600; }
+  .option p { margin: 0; font-size: 0.8em; color: #888; line-height: 1.4; }
+</style>
+</head>
+<body>
+  <h2>Адмінка — твій робочий простір</h2>
+  <p class="subtitle">Два екрани підряд: спочатку дашборд з усіма альбомами, потім детальний вигляд одного — там upload, share link, статистика, перегляд клієнтських лайків.</p>
+
+  <div class="wrap">
+
+    <!-- =================== SCREEN 1: Albums dashboard =================== -->
+    <div>
+      <div class="screen-title">Screen 1 · Albums Dashboard</div>
+      <div class="frame">
+        <div class="frame-header">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="url-bar">gallery.divass.space/admin/albums</div>
+        </div>
+        <div class="admin">
+
+          <aside class="sidebar">
+            <div class="sb-brand">
+              <div class="sb-logo">D</div>
+              <div class="sb-name">divass<span class="sub">Gallery</span></div>
+            </div>
+            <div class="sb-section">Workspace</div>
+            <div class="sb-item active">
+              <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              Albums <span class="count">14</span>
+            </div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Uploads
+            </div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Share Links <span class="count">8</span>
+            </div>
+            <div class="sb-section">Insights</div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              Client Selections
+            </div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              Activity
+            </div>
+            <div class="sb-section">System</div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              Storage <span class="count">3.4 GB</span>
+            </div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              Settings
+            </div>
+            <div class="sb-spacer"></div>
+            <div class="sb-account">
+              <div class="sb-avatar"></div>
+              <div class="sb-user">divass<span class="em">admin@divass.space</span></div>
+            </div>
+          </aside>
+
+          <main class="main">
+            <div class="topbar">
+              <div>
+                <h3>Albums</h3>
+                <div class="sub">14 total · 8 published · 2 drafts</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn-ghost">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+                  Filter
+                </button>
+                <button class="btn-primary">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24" style="color:#000;stroke-width:2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  New album
+                </button>
+              </div>
+            </div>
+
+            <div class="filter-row">
+              <div class="search">
+                <svg class="ic-sm ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input placeholder="Search albums..." value="">
+              </div>
+              <div class="chip active">All</div>
+              <div class="chip">Published</div>
+              <div class="chip">Drafts</div>
+              <div class="chip">Archived</div>
+            </div>
+
+            <div class="albums">
+
+              <div class="album">
+                <div class="album-cover p1">
+                  <div class="album-badge public">● Public</div>
+                  <div class="album-meta-overlay">
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> 42</span>
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 12</span>
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> 38</span>
+                  </div>
+                </div>
+                <div class="album-body">
+                  <div class="album-title">Anna & Oleh</div>
+                  <div class="album-date">Wedding · Oct 2026</div>
+                </div>
+              </div>
+
+              <div class="album">
+                <div class="album-cover p5">
+                  <div class="album-badge private">● Private</div>
+                  <div class="album-meta-overlay">
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> 86</span>
+                  </div>
+                </div>
+                <div class="album-body">
+                  <div class="album-title">Hatfield Family</div>
+                  <div class="album-date">Portrait · Sep 2026</div>
+                </div>
+              </div>
+
+              <div class="album">
+                <div class="album-cover p3">
+                  <div class="album-badge public">● Public</div>
+                  <div class="album-meta-overlay">
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> 24</span>
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 7</span>
+                  </div>
+                </div>
+                <div class="album-body">
+                  <div class="album-title">Coastline Series</div>
+                  <div class="album-date">Landscape · Aug 2026</div>
+                </div>
+              </div>
+
+              <div class="album">
+                <div class="album-cover p8">
+                  <div class="album-badge draft">○ Draft</div>
+                  <div class="album-meta-overlay">
+                    <span class="stat"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> 19</span>
+                  </div>
+                </div>
+                <div class="album-body">
+                  <div class="album-title">Studio Test Shoot</div>
+                  <div class="album-date">Test · Today</div>
+                </div>
+              </div>
+
+              <div class="album new">
+                <svg class="ic-lg ic" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <div style="font-size: 0.85em; font-weight: 500;">New album</div>
+                <div style="font-size: 0.72em">drag photos here</div>
+              </div>
+
+              <div class="album">
+                <div class="album-cover p12">
+                  <div class="album-badge private">● Private</div>
+                </div>
+                <div class="album-body">
+                  <div class="album-title">Maria Wedding Trial</div>
+                  <div class="album-date">Wedding · Jul 2026</div>
+                </div>
+              </div>
+
+            </div>
+          </main>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== SCREEN 2: Album detail =================== -->
+    <div>
+      <div class="screen-title">Screen 2 · Album Detail (upload + share + selections)</div>
+      <div class="frame">
+        <div class="frame-header">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="url-bar">gallery.divass.space/admin/albums/anna-oleh</div>
+        </div>
+        <div class="admin">
+
+          <aside class="sidebar">
+            <div class="sb-brand">
+              <div class="sb-logo">D</div>
+              <div class="sb-name">divass<span class="sub">Gallery</span></div>
+            </div>
+            <div class="sb-section">Workspace</div>
+            <div class="sb-item active">
+              <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              Albums
+            </div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Uploads
+            </div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Share Links
+            </div>
+            <div class="sb-section">Insights</div>
+            <div class="sb-item">
+              <svg class="ic" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              Client Selections
+            </div>
+            <div class="sb-spacer"></div>
+            <div class="sb-account">
+              <div class="sb-avatar"></div>
+              <div class="sb-user">divass<span class="em">admin@divass.space</span></div>
+            </div>
+          </aside>
+
+          <main class="main">
+            <div class="breadcrumb">
+              <a>Albums</a> <svg class="ic-sm ic" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg> <span>Anna & Oleh</span>
+            </div>
+            <div class="topbar">
+              <div>
+                <h3>Anna & Oleh</h3>
+                <div class="sub">Wedding · October 2026 · 42 photos · 124 MB</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn-ghost">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+                </button>
+                <button class="btn-ghost">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  Preview
+                </button>
+                <button class="btn-primary">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24" style="color:#000;stroke-width:2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Upload photos
+                </button>
+              </div>
+            </div>
+
+            <!-- Share link card -->
+            <div class="share-card">
+              <div class="share-icon">
+                <svg class="ic-lg ic" viewBox="0 0 24 24" style="color:#fff"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </div>
+              <div class="share-info">
+                <div class="share-label">Public share link · active</div>
+                <div class="share-url">gallery.divass.space/a/Hk7eRq8x · expires Dec 31</div>
+                <div class="share-meta">
+                  <span class="item"><svg class="ic-sm ic" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> 38 views</span>
+                  <span class="item"><svg class="ic-sm ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 12 favorites</span>
+                  <span class="item"><svg class="ic-sm ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> No password</span>
+                </div>
+              </div>
+              <div class="share-actions">
+                <div class="icon-btn" title="Copy link">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </div>
+                <div class="icon-btn" title="QR code">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="21" y2="14"/><line x1="14" y1="21" x2="21" y2="21"/><line x1="14" y1="17" x2="17" y2="17"/></svg>
+                </div>
+                <div class="icon-btn" title="Settings">
+                  <svg class="ic-sm ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats">
+              <div class="stat-card">
+                <div class="stat-label">Photos</div>
+                <div class="stat-value">42</div>
+                <div class="stat-sub">124 MB total</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Views</div>
+                <div class="stat-value">38</div>
+                <div class="stat-sub">last 7 days</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Favorites</div>
+                <div class="stat-value"><span class="pink">12</span></div>
+                <div class="stat-sub">marked by clients</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Downloads</div>
+                <div class="stat-value">3</div>
+                <div class="stat-sub">2 archives, 1 single</div>
+              </div>
+            </div>
+
+            <div class="manage-header">
+              <h4>Photos</h4>
+              <div style="display:flex;gap:8px;align-items:center;font-size:0.8em;color:#888">
+                <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;background:#ff4d6d;border-radius:50%"></span> 12 marked as favorite</span>
+              </div>
+            </div>
+
+            <div class="photo-grid">
+              <div class="photo-tile p1 cover">
+                <div class="liked-pill"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 4</div>
+                <div class="cover-badge">COVER</div>
+              </div>
+              <div class="photo-tile p2"><div class="liked-pill"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 2</div></div>
+              <div class="photo-tile p3"></div>
+              <div class="photo-tile p4"><div class="liked-pill"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 3</div></div>
+              <div class="photo-tile p5"></div>
+              <div class="photo-tile p6"><div class="liked-pill"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 1</div></div>
+              <div class="photo-tile p7"></div>
+              <div class="photo-tile p8"></div>
+              <div class="photo-tile p9"><div class="liked-pill"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 2</div></div>
+              <div class="photo-tile p10"></div>
+              <div class="photo-tile p11"></div>
+              <div class="photo-tile upload-tile">
+                <svg class="ic-lg ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span style="font-size:0.7em">Drop here</span>
+              </div>
+            </div>
+
+          </main>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="options">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)">
+      <h4>Все ок, далі</h4>
+      <p>Адмінка підходить. Йдемо до фінального дизайн-документу.</p>
+    </div>
+    <div class="option" data-choice="simpler" onclick="toggleSelect(this)">
+      <h4>Хочу простіше</h4>
+      <p>Прибери частину sidebar-пунктів і stats — мені треба тільки upload + share link.</p>
+    </div>
+    <div class="option" data-choice="other" onclick="toggleSelect(this)">
+      <h4>Інше — напишу в терміналі</h4>
+      <p>Хочу інакше / додати щось</p>
+    </div>
+  </div>
+
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll('.option').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    const choice = el.dataset.choice;
+    const text = el.querySelector('h4').textContent;
+    fetch('/event', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'click', choice, text, timestamp: Date.now() }) });
+  }
+</script>
+</body>
+</html>

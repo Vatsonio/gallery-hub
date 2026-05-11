@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sticky CTA redesign — 3 варіанти</title>
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; margin: 0; padding: 32px; -webkit-font-smoothing: antialiased; }
+  h2 { font-size: 1.5em; margin: 0 0 8px; font-weight: 600; letter-spacing: -0.01em; }
+  .subtitle { color: #888; margin: 0 0 32px; font-size: 0.92em; }
+  .label { color: #666; font-size: 0.68em; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 6px; font-weight: 500; }
+
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 1200px; margin: 0 auto 32px; }
+  @media (max-width: 1000px) { .row { grid-template-columns: 1fr; } }
+
+  .panel { background: #0f0f0f; border: 1px solid #1a1a1a; border-radius: 16px; padding: 24px 20px; }
+  .panel-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+  .panel-name { font-size: 0.85em; font-weight: 500; color: #fff; }
+  .panel-tag { font-size: 0.68em; color: #888; padding: 3px 10px; border: 1px solid #2a2a2a; border-radius: 99px; }
+
+  /* Phone frame */
+  .phone { width: 280px; height: 580px; background: #000; border-radius: 38px; padding: 8px; box-shadow: 0 0 0 2px #1a1a1a, 0 24px 60px rgba(0,0,0,0.6); margin: 0 auto; position: relative; }
+  .phone-notch { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); width: 90px; height: 22px; background: #000; border-radius: 12px; z-index: 10; }
+  .phone-screen { width: 100%; height: 100%; background: #0a0a0a; border-radius: 32px; overflow: hidden; position: relative; color: #fff; }
+
+  .m-header { padding: 50px 18px 14px; }
+  .m-back { font-size: 0.72em; color: #6a6a6a; letter-spacing: 0.05em; margin-bottom: 6px; display: flex; align-items: center; gap: 4px; }
+  .m-title { font-size: 1.15em; font-weight: 500; letter-spacing: -0.015em; }
+  .m-meta { font-size: 0.68em; color: #ff4d6d; letter-spacing: 0.15em; text-transform: uppercase; margin-top: 4px; font-weight: 500; }
+
+  .m-grid { padding: 2px; display: flex; flex-direction: column; gap: 3px; }
+  .m-row { display: flex; gap: 3px; height: 130px; }
+  .m-row > div { background-size: cover; background-position: center; position: relative; border-radius: 2px; }
+  .m-row > div .h { position: absolute; top: 8px; right: 8px; color: #ff4d6d; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+
+  /* === Variant A: Glass dock with primary accent === */
+  .cta-a {
+    position: absolute; left: 16px; right: 16px; bottom: 24px;
+    background: rgba(15, 15, 15, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow:
+      0 10px 40px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  }
+  .cta-a-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: linear-gradient(135deg, #ff4d6d 0%, #c9184a 100%);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 4px 16px rgba(255, 77, 109, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  }
+  .cta-a-content { flex: 1; padding-left: 4px; }
+  .cta-a-title { font-size: 0.84em; font-weight: 600; letter-spacing: -0.01em; }
+  .cta-a-meta { font-size: 0.7em; color: #888; margin-top: 1px; letter-spacing: 0.02em; }
+  .cta-a-arrow {
+    width: 36px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    color: #888;
+  }
+
+  /* === Variant B: Floating glow pill === */
+  .cta-b {
+    position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
+    background: #ff4d6d;
+    background-image: linear-gradient(135deg, #ff5e7e 0%, #e63956 100%);
+    border-radius: 99px;
+    padding: 12px 8px 12px 22px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow:
+      0 8px 32px rgba(255, 77, 109, 0.4),
+      0 2px 8px rgba(255, 77, 109, 0.3),
+      0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+    color: #fff;
+    white-space: nowrap;
+  }
+  .cta-b-text { font-size: 0.85em; font-weight: 600; letter-spacing: -0.005em; }
+  .cta-b-count { opacity: 0.7; font-weight: 500; margin-left: 6px; font-size: 0.92em; }
+  .cta-b-action {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(8px);
+  }
+
+  /* === Variant C: Bottom sheet handle === */
+  .cta-c {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(180deg, rgba(10,10,10,0.4) 0%, rgba(10,10,10,0.95) 50%);
+    padding: 40px 20px 28px;
+  }
+  .cta-c-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px);
+    border-radius: 16px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .cta-c-stat {
+    display: flex; flex-direction: column; gap: 2px; flex: 1;
+  }
+  .cta-c-num { font-size: 1.5em; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+  .cta-c-num em { font-style: normal; color: #ff4d6d; }
+  .cta-c-label-row { font-size: 0.68em; color: #6a6a6a; letter-spacing: 0.05em; }
+  .cta-c-btn {
+    background: #fff; color: #000;
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+    letter-spacing: -0.005em;
+  }
+
+  /* SVG icons */
+  .ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ic-sm { width: 14px; height: 14px; }
+  .ic-lg { width: 22px; height: 22px; }
+
+  /* Photos */
+  .p1 { background-image: url('https://images.unsplash.com/photo-1519741497674-611481863552?w=600&q=80'); }
+  .p4 { background-image: url('https://images.unsplash.com/photo-1525772764200-be829a350797?w=600&q=80'); }
+  .p7 { background-image: url('https://images.unsplash.com/photo-1591604466107-ec97de577aff?w=600&q=80'); }
+  .p3 { background-image: url('https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=600&q=80'); }
+
+  .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 24px auto 0; max-width: 1200px; }
+  .option { padding: 16px 20px; border: 1px solid #1a1a1a; border-radius: 14px; background: #0f0f0f; cursor: pointer; transition: all 0.2s; }
+  .option:hover { border-color: #2a2a2a; }
+  .option.selected { border-color: #fff; box-shadow: 0 0 0 1px #fff; }
+  .option h4 { margin: 0 0 4px; font-size: 0.92em; font-weight: 600; letter-spacing: -0.005em; }
+  .option p { margin: 0; font-size: 0.8em; color: #888; line-height: 1.4; }
+
+  .design-notes {
+    max-width: 1200px; margin: 24px auto 0;
+    background: #0f0f0f; border: 1px solid #1a1a1a; border-radius: 14px;
+    padding: 18px 22px; font-size: 0.82em; color: #aaa; line-height: 1.6;
+  }
+  .design-notes b { color: #fff; }
+</style>
+</head>
+<body>
+  <h2>Sticky CTA — 3 редизайни</h2>
+  <p class="subtitle">Та сама favorites-сторінка на мобільному, але кнопка експорту переосмислена. Без емодзі, SVG-іконки, акцент рожевим (того ж кольору що лайк), glassmorphism / gradient / bottom sheet.</p>
+
+  <div class="row">
+
+    <!-- A: Glass dock with accent icon -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-name">A — Glass Dock</div>
+        <div class="panel-tag">Glassmorphism</div>
+      </div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="m-header">
+            <div class="m-back">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+              Anna & Oleh
+            </div>
+            <div class="m-title">Favorites</div>
+            <div class="m-meta">3 selected · 24 MB</div>
+          </div>
+          <div class="m-grid">
+            <div class="m-row" style="height:170px">
+              <div class="p1" style="flex: 1.5"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+              <div class="p4" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+            </div>
+            <div class="m-row" style="height:170px">
+              <div class="p7" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+            </div>
+          </div>
+          <div class="cta-a">
+            <div class="cta-a-icon">
+              <svg class="ic ic-lg" viewBox="0 0 24 24" style="color:#fff"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+            <div class="cta-a-content">
+              <div class="cta-a-title">Export favorites</div>
+              <div class="cta-a-meta">3 photos · 24 MB · ZIP</div>
+            </div>
+            <div class="cta-a-arrow">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B: Floating gradient pill -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-name">B — Floating Gradient</div>
+        <div class="panel-tag">Bold accent</div>
+      </div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="m-header">
+            <div class="m-back">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+              Anna & Oleh
+            </div>
+            <div class="m-title">Favorites</div>
+            <div class="m-meta">3 selected · 24 MB</div>
+          </div>
+          <div class="m-grid">
+            <div class="m-row" style="height:170px">
+              <div class="p1" style="flex: 1.5"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+              <div class="p4" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+            </div>
+            <div class="m-row" style="height:170px">
+              <div class="p7" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+            </div>
+          </div>
+          <div class="cta-b">
+            <span class="cta-b-text">Export</span>
+            <span class="cta-b-count">3 · 24 MB</span>
+            <div class="cta-b-action">
+              <svg class="ic ic-sm" viewBox="0 0 24 24" style="color:#fff"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C: Bottom sheet with stat -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-name">C — Stat Sheet</div>
+        <div class="panel-tag">Editorial</div>
+      </div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="m-header">
+            <div class="m-back">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+              Anna & Oleh
+            </div>
+            <div class="m-title">Favorites</div>
+            <div class="m-meta">3 selected · 24 MB</div>
+          </div>
+          <div class="m-grid">
+            <div class="m-row" style="height:160px">
+              <div class="p1" style="flex: 1.5"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+              <div class="p4" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+            </div>
+            <div class="m-row" style="height:160px">
+              <div class="p7" style="flex: 1"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+            </div>
+          </div>
+          <div class="cta-c">
+            <div class="cta-c-card">
+              <div class="cta-c-stat">
+                <div class="cta-c-num"><em>3</em> photos</div>
+                <div class="cta-c-label-row">24 MB · originals</div>
+              </div>
+              <div class="cta-c-btn">
+                <svg class="ic ic-sm" viewBox="0 0 24 24" style="color:#000;stroke-width:2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Export
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="design-notes">
+    <b>Що змінилось проти попередньої версії:</b> прибрав плаский білий pill з emoji-стрілкою. Скрізь — SVG іконки (Lucide-style), правильні touch targets 44px+, акцент рожевим (#ff4d6d) щоб візуально звʼязати з лайком. Безпечні зони знизу під home-indicator. Backdrop blur де треба прозорість поверх фото.
+    <br><br>
+    <b>A:</b> glassmorphic dock — мʼякий, неагресивний, працює і на світлих, і на темних фото під ним. <b>B:</b> рожевий пігулько-CTA з градієнтом — найкричущіший, але стиль = "ось де натиснути". <b>C:</b> підкреслює статистику ("3 photos"), кнопка маленька — для людей яким не подобається коли CTA "захоплює" екран.
+  </div>
+
+  <div class="options">
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <h4>A — Glass Dock</h4>
+      <p>Glassmorphic, рожева іконка, текст з мета. Найбільш стримано.</p>
+    </div>
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <h4>B — Floating Gradient</h4>
+      <p>Яскравий рожевий gradient pill. CTA впадає в око.</p>
+    </div>
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <h4>C — Stat Sheet</h4>
+      <p>Bottom sheet з акцентом на цифру "3 photos". Кнопка скромна.</p>
+    </div>
+  </div>
+
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll('.option').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    const choice = el.dataset.choice;
+    const text = el.querySelector('h4').textContent;
+    fetch('/event', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'click', choice, text, timestamp: Date.now() }) });
+  }
+</script>
+</body>
+</html>
