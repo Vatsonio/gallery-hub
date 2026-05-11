@@ -65,6 +65,7 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      WIDGET_TOKEN: ${WIDGET_TOKEN:-}
     ports:
       - "3000:3000"
     depends_on:
