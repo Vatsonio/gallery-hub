@@ -46,8 +46,17 @@ function uploadXHR(url: string, file: File, onProgress: (p: number) => void): Pr
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     };
-    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`PUT ${xhr.status}`)));
-    xhr.onerror = () => reject(new Error("network error"));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      // Surface the server response so we can diagnose 4xx/5xx instead of guessing.
+      const body = (xhr.responseText || "").slice(0, 240).replace(/\s+/g, " ");
+      console.error("[upload] PUT failed", { url, status: xhr.status, body });
+      reject(new Error(`PUT ${xhr.status}: ${body || xhr.statusText || "no body"}`));
+    };
+    xhr.onerror = () => {
+      console.error("[upload] PUT network error (CORS/DNS/refused)", { url });
+      reject(new Error("network error (likely CORS or unreachable — open DevTools Network tab)"));
+    };
     xhr.send(file);
   });
 }
