@@ -2,6 +2,7 @@ import PgBoss from "pg-boss";
 
 export const GENERATE_DERIVATIVES_QUEUE = "generate-derivatives";
 export const REAP_DELETED_ALBUMS_QUEUE = "reap-deleted-albums";
+export const REAP_STALE_EXPORTS_QUEUE = "reap-stale-exports";
 
 let bossPromise: Promise<PgBoss> | null = null;
 
@@ -20,6 +21,7 @@ export async function getBoss(): Promise<PgBoss> {
       await boss.start();
       await boss.createQueue(GENERATE_DERIVATIVES_QUEUE);
       await boss.createQueue(REAP_DELETED_ALBUMS_QUEUE);
+      await boss.createQueue(REAP_STALE_EXPORTS_QUEUE);
       return boss;
     })();
   }
