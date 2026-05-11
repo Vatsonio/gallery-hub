@@ -59,6 +59,8 @@ export default async function PublicPhotoPage({ params }: Props) {
       prevHref={prev ? `/a/${token}/p/${prev.id}` : null}
       nextHref={next ? `/a/${token}/p/${next.id}` : null}
       backHref={`/a/${token}`}
+      index={idx}
+      total={photos.length}
     />
   );
 }
