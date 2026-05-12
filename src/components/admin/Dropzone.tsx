@@ -1,7 +1,7 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { UploadCloud } from "lucide-react";
+import { ChevronDown, UploadCloud } from "lucide-react";
 import type {
   PresignRequestBody, PresignResponse, FinalizeRequestBody,
 } from "@/lib/types";
@@ -63,7 +63,31 @@ function uploadXHR(url: string, file: File, onProgress: (p: number) => void): Pr
 
 export function Dropzone({ albumId, onComplete }: Props) {
   const [rows, setRows] = useState<RowState[]>([]);
+  const [expanded, setExpanded] = useState(false);
   const fileMap = useRef<Map<string, File>>(new Map());
+
+  // Drive the collapse: expand the moment work appears, collapse the
+  // moment everything has finished (uploaded or errored). Errors keep
+  // the panel open so the user notices what failed.
+  const inFlight = useMemo(
+    () => rows.some((r) => r.status === "pending" || r.status === "uploading"),
+    [rows],
+  );
+  const hasErrors = useMemo(
+    () => rows.some((r) => r.status === "error"),
+    [rows],
+  );
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+    if (inFlight || hasErrors) {
+      setExpanded(true);
+    } else {
+      // small delay so the user sees the last "100%" before it tucks away.
+      const t = setTimeout(() => setExpanded(false), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [inFlight, hasErrors, rows.length]);
 
   const onDrop = useCallback(async (accepted: File[]) => {
     const newRows: RowState[] = accepted.map((f) => {
@@ -170,24 +194,54 @@ export function Dropzone({ albumId, onComplete }: Props) {
         <p className="mt-1 text-xs text-zinc-500">JPG / PNG / WebP, up to 50 MB each</p>
       </div>
       {rows.length > 0 && (
-        <ul className="mt-4 space-y-1 text-xs">
-          {rows.map((r) => (
-            <li key={r.id} className="flex items-center gap-2 text-zinc-400">
-              <span className="w-48 truncate">{r.filename}</span>
-              <span className="flex-1">
-                <span className="block h-1 overflow-hidden rounded bg-zinc-800">
-                  <span
-                    className={`block h-full ${r.status === "error" ? "bg-rose-500" : "bg-rose-400"}`}
-                    style={{ width: `${r.progress}%` }}
-                  />
-                </span>
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-xs text-zinc-300 hover:bg-white/[0.04] transition cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <span className="font-medium text-white/80">
+                {inFlight
+                  ? `Uploading ${rows.filter((r) => r.status === "uploaded").length} / ${rows.length}`
+                  : hasErrors
+                    ? `${rows.filter((r) => r.status === "error").length} error${rows.filter((r) => r.status === "error").length === 1 ? "" : "s"}`
+                    : `${rows.length} uploaded`}
               </span>
-              <span className="w-20 text-right">
-                {r.status === "error" ? r.error : `${r.progress}%`}
-              </span>
-            </li>
-          ))}
-        </ul>
+              {!inFlight && !hasErrors && (
+                <span className="text-emerald-400/80">✓</span>
+              )}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-zinc-400 transition-transform duration-300 ${expanded ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+          </button>
+          <div
+            className={`grid transition-[grid-template-rows] duration-300 ease-out ${expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
+          >
+            <div className="overflow-hidden">
+              <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto pr-1 text-xs">
+                {rows.map((r) => (
+                  <li key={r.id} className="flex items-center gap-2 text-zinc-400">
+                    <span className="w-48 truncate">{r.filename}</span>
+                    <span className="flex-1">
+                      <span className="block h-1 overflow-hidden rounded bg-zinc-800">
+                        <span
+                          className={`block h-full ${r.status === "error" ? "bg-rose-500" : "bg-rose-400"}`}
+                          style={{ width: `${r.progress}%` }}
+                        />
+                      </span>
+                    </span>
+                    <span className="w-20 text-right">
+                      {r.status === "error" ? r.error : `${r.progress}%`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
