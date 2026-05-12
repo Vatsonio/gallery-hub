@@ -12,6 +12,12 @@ interface Props {
   photoId: string;
   href: string;
   webUrl: string;
+  /**
+   * Optional AVIF mirror of the web variant. When present we render a
+   * <picture> with AVIF first so AVIF-capable browsers save ~50% of
+   * bytes; everywhere else falls back to webUrl automatically.
+   */
+  avifUrl?: string | null;
   /** flex-basis style for justified-row layout. */
   flexStyle: React.CSSProperties;
   initialFavorited: boolean;
@@ -52,6 +58,7 @@ export default function PhotoTile({
   photoId,
   href,
   webUrl,
+  avifUrl,
   flexStyle,
   initialFavorited,
   index = 0,
@@ -207,17 +214,20 @@ export default function PhotoTile({
           className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-0" : "opacity-100"}`}
         />
       ) : null}
-      <img
-        ref={imgRef}
-        src={webUrl}
-        alt=""
-        loading={priority ? "eager" : "lazy"}
-        decoding={priority ? "sync" : "async"}
-        fetchPriority={priority ? "high" : "auto"}
-        draggable={false}
-        onLoad={() => setLoaded(true)}
-        className={`relative h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
-      />
+      <picture>
+        {avifUrl ? <source srcSet={avifUrl} type="image/avif" /> : null}
+        <img
+          ref={imgRef}
+          src={webUrl}
+          alt=""
+          loading={priority ? "eager" : "lazy"}
+          decoding={priority ? "sync" : "async"}
+          fetchPriority={priority ? "high" : "auto"}
+          draggable={false}
+          onLoad={() => setLoaded(true)}
+          className={`relative h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
+        />
+      </picture>
       <HeartBurst trigger={burst} />
       <HeartOverlay favorited={favorited} onClick={onHeartClick} />
     </div>

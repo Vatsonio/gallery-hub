@@ -7,7 +7,7 @@ import {
 } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
 import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey } from "@/lib/keys";
+import { variantKey, avifVariantKey } from "@/lib/keys";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
@@ -64,13 +64,24 @@ export default async function PublicGalleryPage({ params }: Props) {
   const photos = (await listPhotos(album.id)).filter((p) => p.status === "ready");
   const [decorated, favoriteIds] = await Promise.all([
     Promise.all(
-      photos.map(async (p) => ({
-        ...p,
-        web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600, {
-          responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-        }),
-        thumbhash_url: thumbhashToDataUrl(p.thumbhash),
-      })),
+      photos.map(async (p) => {
+        const [webUrl, avifUrl] = await Promise.all([
+          presignGet(variantKey(album.id, p.id, "web"), 3600, {
+            responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+          }),
+          p.avif_bytes_web
+            ? presignGet(avifVariantKey(album.id, p.id, "web"), 3600, {
+                responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+              })
+            : Promise.resolve(null),
+        ]);
+        return {
+          ...p,
+          web_url: webUrl,
+          avif_url: avifUrl,
+          thumbhash_url: thumbhashToDataUrl(p.thumbhash),
+        };
+      }),
     ),
     listFavoritePhotoIds(token, viewerId),
   ]);
@@ -81,6 +92,11 @@ export default async function PublicGalleryPage({ params }: Props) {
     decorated.find((p) => p.id === album.cover_photo_id) ?? decorated[0] ?? null;
   const coverUrl = coverPhoto
     ? await presignGet(variantKey(album.id, coverPhoto.id, "large"), 3600, {
+        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+      })
+    : null;
+  const coverAvifUrl = coverPhoto && coverPhoto.avif_bytes_large
+    ? await presignGet(avifVariantKey(album.id, coverPhoto.id, "large"), 3600, {
         responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
       })
     : null;
@@ -143,21 +159,26 @@ export default async function PublicGalleryPage({ params }: Props) {
                 Preload the cover so the browser starts fetching during HTML
                 parse (before React hydration). fetchPriority="high" and
                 decoding="sync" let the browser bias network + decode work
-                toward the LCP image.
+                toward the LCP image. When AVIF exists, preload that instead
+                of the WEBP — the imagesrcset would be ideal but isn't widely
+                honored, so we preload the lighter variant directly.
               */}
               <link
                 rel="preload"
                 as="image"
-                href={coverUrl}
+                href={coverAvifUrl ?? coverUrl}
                 fetchPriority="high"
               />
-              <img
-                src={coverUrl}
-                alt=""
-                fetchPriority="high"
-                decoding="sync"
-                className="w-full object-cover max-h-[60vh] sm:max-h-[85vh] cover-kenburns"
-              />
+              <picture>
+                {coverAvifUrl ? <source srcSet={coverAvifUrl} type="image/avif" /> : null}
+                <img
+                  src={coverUrl}
+                  alt=""
+                  fetchPriority="high"
+                  decoding="sync"
+                  className="w-full object-cover max-h-[60vh] sm:max-h-[85vh] cover-kenburns"
+                />
+              </picture>
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               <div className="absolute inset-x-0 bottom-0 px-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:pb-16 text-center">
                 <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-white drop-shadow">
@@ -210,6 +231,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           photoId={item.id}
                           href={`/a/${token}/p/${item.id}`}
                           webUrl={photoMap.get(item.id)!.web_url}
+                          avifUrl={photoMap.get(item.id)!.avif_url}
                           thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
@@ -241,6 +263,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           photoId={item.id}
                           href={`/a/${token}/p/${item.id}`}
                           webUrl={photoMap.get(item.id)!.web_url}
+                          avifUrl={photoMap.get(item.id)!.avif_url}
                           thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}

@@ -8,7 +8,7 @@ import {
 } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
 import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey } from "@/lib/keys";
+import { variantKey, avifVariantKey } from "@/lib/keys";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
@@ -102,13 +102,24 @@ export default async function FavoritesPage({ params }: Props) {
   const ordered = favIds.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
 
   const decorated = await Promise.all(
-    ordered.map(async (p) => ({
-      ...p,
-      web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600, {
-        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-      }),
-      thumbhash_url: thumbhashToDataUrl(p.thumbhash),
-    })),
+    ordered.map(async (p) => {
+      const [webUrl, avifUrl] = await Promise.all([
+        presignGet(variantKey(album.id, p.id, "web"), 3600, {
+          responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+        }),
+        p.avif_bytes_web
+          ? presignGet(avifVariantKey(album.id, p.id, "web"), 3600, {
+              responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+            })
+          : Promise.resolve(null),
+      ]);
+      return {
+        ...p,
+        web_url: webUrl,
+        avif_url: avifUrl,
+        thumbhash_url: thumbhashToDataUrl(p.thumbhash),
+      };
+    }),
   );
 
   const totalBytes = decorated.reduce((s, p) => s + Number(p.orig_bytes ?? 0), 0);
@@ -165,6 +176,7 @@ export default async function FavoritesPage({ params }: Props) {
                     photoId={item.id}
                     href={`/a/${token}/p/${item.id}`}
                     webUrl={photoMap.get(item.id)!.web_url}
+                    avifUrl={photoMap.get(item.id)!.avif_url}
                     thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
                     flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                     initialFavorited={true}
@@ -195,6 +207,7 @@ export default async function FavoritesPage({ params }: Props) {
                     photoId={item.id}
                     href={`/a/${token}/p/${item.id}`}
                     webUrl={photoMap.get(item.id)!.web_url}
+                    avifUrl={photoMap.get(item.id)!.avif_url}
                     thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
                     flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                     initialFavorited={true}

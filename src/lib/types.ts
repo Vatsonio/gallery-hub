@@ -48,6 +48,10 @@ export interface PhotoRow {
   created_at: string;
   /** Base64-encoded ThumbHash placeholder, null until the worker fills it in. */
   thumbhash?: string | null;
+  /** Byte size of the AVIF mirror of the web variant; null when absent. */
+  avif_bytes_web?: number | null;
+  /** Byte size of the AVIF mirror of the large variant; null when absent. */
+  avif_bytes_large?: number | null;
 }
 
 export interface AlbumRow {
