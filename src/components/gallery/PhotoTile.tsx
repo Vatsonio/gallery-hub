@@ -18,6 +18,12 @@ interface Props {
   index?: number;
   /** Visual size: justified-row tiles use object-cover. */
   className?: string;
+  /**
+   * Hint the browser this tile is above-the-fold and should be fetched
+   * eagerly. Applies fetchPriority="high" + decoding="sync" + drops
+   * loading="lazy". Reserve for the first row of the grid.
+   */
+  priority?: boolean;
 }
 
 const DOUBLE_TAP_WINDOW_MS = 280;
@@ -43,6 +49,7 @@ export default function PhotoTile({
   initialFavorited,
   index = 0,
   className,
+  priority = false,
 }: Props) {
   const router = useRouter();
   const [favorited, setFavorited] = useState(initialFavorited);
@@ -172,8 +179,9 @@ export default function PhotoTile({
       <img
         src={webUrl}
         alt=""
-        loading="lazy"
-        decoding="async"
+        loading={priority ? "eager" : "lazy"}
+        decoding={priority ? "sync" : "async"}
+        fetchPriority={priority ? "high" : "auto"}
         draggable={false}
         className="h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04]"
       />

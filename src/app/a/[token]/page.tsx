@@ -137,9 +137,23 @@ export default async function PublicGalleryPage({ params }: Props) {
         {coverPhoto && coverUrl ? (
           <section className="relative w-full max-h-[60vh] sm:max-h-[85vh] overflow-hidden">
             <div className="relative w-full max-h-[60vh] sm:max-h-[85vh]">
+              {/*
+                Preload the cover so the browser starts fetching during HTML
+                parse (before React hydration). fetchPriority="high" and
+                decoding="sync" let the browser bias network + decode work
+                toward the LCP image.
+              */}
+              <link
+                rel="preload"
+                as="image"
+                href={coverUrl}
+                fetchPriority="high"
+              />
               <img
                 src={coverUrl}
                 alt=""
+                fetchPriority="high"
+                decoding="sync"
                 className="w-full object-cover max-h-[60vh] sm:max-h-[85vh] cover-kenburns"
               />
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
@@ -194,6 +208,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
                           index={photoIndex.get(item.id) ?? 0}
+                          priority={i === 0}
                         />
                       ))}
                     </div>
@@ -216,6 +231,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
                           index={photoIndex.get(item.id) ?? 0}
+                          priority={i === 0}
                         />
                       ))}
                     </div>
