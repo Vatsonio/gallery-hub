@@ -155,3 +155,194 @@ export async function loadWidgetSummary(baseUrl: string): Promise<WidgetSummary>
 export function _resetWidgetCacheForTests(): void {
   cache = null;
 }
+
+// ---------------------------------------------------------------------------
+// /chikaq insights aggregators.
+//
+// These run on demand (no caching) — the page is admin-gated and refreshes
+// rarely. Keeping them cache-less also means the dashboard never serves stale
+// numbers, which matters when the user is actively diagnosing traffic.
+// ---------------------------------------------------------------------------
+
+export interface InsightsStats {
+  albums_total: number;
+  photos_total: number;
+  storage_bytes: number;
+}
+
+export interface ViewsTrendPoint {
+  /** ISO date (YYYY-MM-DD) bucket. */
+  day: string;
+  views: number;
+}
+
+export interface TopAlbumRow {
+  album_id: string;
+  title: string;
+  views: number;
+}
+
+export type RecentActivityKind = "favorite" | "page_view" | "download";
+
+export interface RecentActivityRow {
+  kind: RecentActivityKind;
+  viewer_id_short: string;
+  album_title: string;
+  at: string;
+  /** Extra context — favorited count for grouped runs, bytes for downloads. */
+  detail: string | null;
+}
+
+interface TrendRow {
+  day: Date;
+  views: bigint | string;
+}
+
+interface TopAlbumDbRow {
+  album_id: string;
+  title: string;
+  views: bigint | string;
+}
+
+interface RecentRawRow {
+  share_token: string;
+  viewer_id: string;
+  event_type: string;
+  created_at: Date;
+  album_title: string;
+  details: { bytes?: number; scope?: string; variant?: string } | null;
+}
+
+/**
+ * Headline tiles for /chikaq: total albums, total photos, total bytes
+ * across all originals. The widget cache shares the same SQL but adds
+ * "published" splits and recent_albums; this version is intentionally
+ * smaller because /chikaq has its own composition.
+ */
+export async function loadInsightsStats(): Promise<InsightsStats> {
+  const rows = await sql<StatsRow[]>`
+    SELECT
+      (SELECT COUNT(*) FROM albums)::bigint AS albums_total,
+      (SELECT COUNT(*) FROM albums WHERE status = 'published')::bigint AS albums_published,
+      (SELECT COUNT(*) FROM photos)::bigint AS photos_total,
+      (SELECT COALESCE(SUM(orig_bytes), 0) FROM photos)::bigint AS storage_bytes
+  `;
+  const r = rows[0];
+  return {
+    albums_total: n(r.albums_total),
+    photos_total: n(r.photos_total),
+    storage_bytes: n(r.storage_bytes),
+  };
+}
+
+/**
+ * 30-day daily views trend. Returns one entry per day with at least one
+ * page_view; missing days are NOT zero-filled — the sparkline renderer
+ * fills them client-side from the date range. Keeps the SQL simple and
+ * lets the renderer decide the gap-handling story.
+ */
+export async function loadViewsTrend30d(): Promise<ViewsTrendPoint[]> {
+  const rows = await sql<TrendRow[]>`
+    SELECT date_trunc('day', created_at)::date AS day,
+           COUNT(*)::bigint AS views
+      FROM view_events
+     WHERE created_at > now() - interval '30 days'
+       AND event_type = 'page_view'
+     GROUP BY 1
+     ORDER BY 1 ASC
+  `;
+  return rows.map((r) => ({
+    day: (r.day instanceof Date ? r.day : new Date(r.day)).toISOString().slice(0, 10),
+    views: n(r.views),
+  }));
+}
+
+/**
+ * Top 5 albums by distinct-viewer page_view count over the last 30 days.
+ * Distinct viewers (not raw events) is the metric that matters — a single
+ * refresh-spam viewer can't inflate the leaderboard.
+ */
+export async function loadTopAlbums30d(limit: number = 5): Promise<TopAlbumRow[]> {
+  const rows = await sql<TopAlbumDbRow[]>`
+    SELECT a.id AS album_id, a.title, COUNT(DISTINCT v.viewer_id)::bigint AS views
+      FROM view_events v
+      JOIN share_links sl ON sl.token = v.share_token
+      JOIN albums a       ON a.id    = sl.album_id
+     WHERE v.event_type = 'page_view'
+       AND v.created_at > now() - interval '30 days'
+     GROUP BY a.id, a.title
+     ORDER BY views DESC
+     LIMIT ${limit}
+  `;
+  return rows.map((r) => ({
+    album_id: r.album_id,
+    title: r.title,
+    views: n(r.views),
+  }));
+}
+
+/**
+ * Last 24h activity feed, mixing page_view / favorite_add / download events
+ * and collapsing the favorite_add runs through the existing viewerGrouping
+ * window so a 10-photo selection burst shows as one row, not ten.
+ */
+export async function loadRecentActivity24h(limit: number = 20): Promise<RecentActivityRow[]> {
+  const rows = await sql<RecentRawRow[]>`
+    SELECT v.share_token, v.viewer_id, v.event_type, v.created_at,
+           a.title AS album_title, v.details
+      FROM view_events v
+      JOIN share_links sl ON sl.token = v.share_token
+      JOIN albums a       ON a.id    = sl.album_id
+     WHERE v.created_at > now() - interval '24 hours'
+       AND v.event_type IN ('page_view', 'favorite_add', 'download')
+     ORDER BY v.created_at DESC
+     LIMIT 500
+  `;
+
+  // Group the favorite_add runs through the shared windowing helper so the
+  // feed shows "+12 favourites" instead of twelve consecutive heart rows.
+  const favRows: RawFavoriteEvent[] = rows
+    .filter((r) => r.event_type === "favorite_add")
+    .map((r) => ({
+      share_token: r.share_token,
+      viewer_id: r.viewer_id,
+      created_at: r.created_at,
+      album_title: r.album_title,
+    }));
+  const grouped = groupFavoriteEvents(favRows);
+
+  const out: RecentActivityRow[] = [];
+  for (const g of grouped) {
+    out.push({
+      kind: "favorite",
+      viewer_id_short: g.viewer_id_short,
+      album_title: g.album_title,
+      at: g.at,
+      detail: `+${g.added_count} hearted`,
+    });
+  }
+  for (const r of rows) {
+    if (r.event_type === "page_view") {
+      out.push({
+        kind: "page_view",
+        viewer_id_short: r.viewer_id.slice(0, 8),
+        album_title: r.album_title,
+        at: r.created_at.toISOString(),
+        detail: null,
+      });
+    } else if (r.event_type === "download") {
+      const bytes = r.details?.bytes;
+      const mb = typeof bytes === "number" ? Math.max(1, Math.round(bytes / 1_000_000)) : null;
+      out.push({
+        kind: "download",
+        viewer_id_short: r.viewer_id.slice(0, 8),
+        album_title: r.album_title,
+        at: r.created_at.toISOString(),
+        detail: mb ? `${mb} MB` : null,
+      });
+    }
+  }
+
+  out.sort((a, b) => b.at.localeCompare(a.at));
+  return out.slice(0, limit);
+}

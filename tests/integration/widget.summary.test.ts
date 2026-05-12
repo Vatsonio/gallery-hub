@@ -124,3 +124,58 @@ describe.skipIf(skipIf)("/api/widget/summary", () => {
     process.env.WIDGET_TOKEN = prev;
   });
 });
+
+describe.skipIf(skipIf)("/chikaq insights aggregators", () => {
+  it("loadInsightsStats counts albums + photos + bytes", async () => {
+    const { loadInsightsStats } = await import("@/lib/widgetQuery");
+    const s = await loadInsightsStats();
+    expect(s.albums_total).toBeGreaterThanOrEqual(1);
+    expect(s.photos_total).toBe(2);
+    expect(s.storage_bytes).toBe(4_000_000); // 2 × 2 000 000 bytes from the seed
+  });
+
+  it("loadViewsTrend30d returns a day bucket with the seeded page_view", async () => {
+    const { loadViewsTrend30d } = await import("@/lib/widgetQuery");
+    const trend = await loadViewsTrend30d();
+    // The seed inserts exactly one page_view for the album; trend should
+    // collapse to one day with views >= 1.
+    expect(trend.length).toBeGreaterThanOrEqual(1);
+    const total = trend.reduce((s, p) => s + p.views, 0);
+    expect(total).toBeGreaterThanOrEqual(1);
+  });
+
+  it("loadTopAlbums30d ranks the seeded album with one distinct viewer", async () => {
+    const { loadTopAlbums30d } = await import("@/lib/widgetQuery");
+    const rows = await loadTopAlbums30d(5);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows[0]).toMatchObject({ title: "Anna & Oleh", views: 1 });
+  });
+
+  it("loadRecentActivity24h merges favorite groups + page_views", async () => {
+    const { loadRecentActivity24h } = await import("@/lib/widgetQuery");
+    const rows = await loadRecentActivity24h(20);
+    // Seed has 3 favorite_add + 1 page_view → grouping collapses favs into one row.
+    const fav = rows.find((r) => r.kind === "favorite");
+    const view = rows.find((r) => r.kind === "page_view");
+    expect(fav).toBeTruthy();
+    expect(fav?.detail).toBe("+3 hearted");
+    expect(view).toBeTruthy();
+  });
+});
+
+describe("analytics safeCapture", () => {
+  it("does not throw when POSTHOG_KEY is unset", async () => {
+    const prev = process.env.POSTHOG_KEY;
+    delete process.env.POSTHOG_KEY;
+    const { safeCapture, getPostHogClient, _resetAnalyticsForTests } = await import(
+      "@/lib/analytics"
+    );
+    _resetAnalyticsForTests();
+    expect(getPostHogClient()).toBeNull();
+    expect(() =>
+      safeCapture({ distinctId: "v1", event: "noop", properties: { ok: true } }),
+    ).not.toThrow();
+    if (prev !== undefined) process.env.POSTHOG_KEY = prev;
+    _resetAnalyticsForTests();
+  });
+});
