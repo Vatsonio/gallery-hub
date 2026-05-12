@@ -12,6 +12,7 @@ import { verifyPassword } from "@/lib/passwords";
 import { toggleFavoriteForViewer } from "@/lib/favorites";
 import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
 import { requireAdminSessionFromCookies } from "@/lib/session";
+import { safeCapture } from "@/lib/analytics";
 import { randomUUID } from "node:crypto";
 
 export interface ToggleFavoriteResult {
@@ -78,6 +79,15 @@ export async function toggleFavorite(
   }
 
   const res = await toggleFavoriteForViewer(token, photoId, viewerId);
+  safeCapture({
+    distinctId: viewerId,
+    event: res.state === "added" ? "favorite_added" : "favorite_removed",
+    properties: {
+      share_token: token,
+      album_id: status.link.album_id,
+      photo_id: photoId,
+    },
+  });
   return { favorited: res.state === "added" };
 }
 
@@ -109,6 +119,12 @@ export async function unlockShareLink(
     secure: process.env.NODE_ENV === "production",
     path: `/a/${token}`,
     maxAge: UNLOCK_TTL_SECONDS,
+  });
+  const viewerForCapture = jar.get(VIEWER_COOKIE)?.value ?? "anonymous";
+  safeCapture({
+    distinctId: viewerForCapture,
+    event: "share_unlocked",
+    properties: { share_token: token, album_id: link.album_id },
   });
   return { ok: true };
 }

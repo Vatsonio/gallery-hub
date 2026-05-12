@@ -17,6 +17,7 @@ import {
 import { listFavoritePhotoIds } from "@/lib/favorites";
 import { requireAdminSessionFromCookies } from "@/lib/session";
 import { computeExportSizes } from "@/lib/exportSizes";
+import { safeCapture } from "@/lib/analytics";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "./_gallery-shell";
 
@@ -140,6 +141,16 @@ export default async function PublicGalleryPage({ params }: Props) {
             AND created_at > NOW() - INTERVAL '30 minutes'
        )
     `.catch(() => undefined);
+    safeCapture({
+      distinctId: viewerId,
+      event: "gallery_view",
+      properties: {
+        share_token: token,
+        album_id: album.id,
+        album_title: album.title,
+        photo_count: decorated.length,
+      },
+    });
   }
 
   const exportSizes = await computeExportSizes(token, viewerId, album.id);

@@ -22,6 +22,7 @@ import { variantKey } from "@/lib/keys";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { VIEWER_COOKIE } from "@/lib/viewer";
 import { createRateLimiter } from "@/lib/rateLimiter";
+import { safeCapture } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -105,6 +106,15 @@ export async function GET(
     });
   }
 
+  // export_started fires regardless of cache hit/miss so funnels measure
+  // intent, not zip-build time. The matching export_completed (with bytes)
+  // lands either in the cache-hit branch or after the size lookup below.
+  safeCapture({
+    distinctId: viewerId,
+    event: "export_started",
+    properties: { share_token: token, scope, variant },
+  });
+
   // Resolve the photo set.
   let photos: PhotoRow[];
   if (scope === "favorites") {
@@ -135,7 +145,19 @@ export async function GET(
     const cachedSig = head.Metadata?.["favorites_signature"];
     if (cachedSig === sig) {
       const presigned = await getPresignedUrl(cacheKey, 3600);
-      await logExport(token, viewerId, scope, variant, head.ContentLength ?? 0);
+      const cachedBytes = head.ContentLength ?? 0;
+      await logExport(token, viewerId, scope, variant, cachedBytes);
+      safeCapture({
+        distinctId: viewerId,
+        event: "export_completed",
+        properties: {
+          share_token: token,
+          scope,
+          variant,
+          total_bytes: cachedBytes,
+          cache_hit: true,
+        },
+      });
       return NextResponse.redirect(presigned, 302);
     }
   } catch {
@@ -190,7 +212,19 @@ export async function GET(
       FROM photos
      WHERE id = ANY(${photos.map((p) => p.id)}::uuid[])
   `;
-  await logExport(token, viewerId, scope, variant, Number(sizeRow[0]?.total ?? 0));
+  const totalBytes = Number(sizeRow[0]?.total ?? 0);
+  await logExport(token, viewerId, scope, variant, totalBytes);
+  safeCapture({
+    distinctId: viewerId,
+    event: "export_completed",
+    properties: {
+      share_token: token,
+      scope,
+      variant,
+      total_bytes: totalBytes,
+      cache_hit: false,
+    },
+  });
 
   // Cast PassThrough → web ReadableStream. Node's `Readable.toWeb` would be
   // ideal but Next 15 happily accepts a Node Readable here.

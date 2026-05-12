@@ -18,6 +18,7 @@ import {
 import { listFavoritePhotoIds } from "@/lib/favorites";
 import { requireAdminSessionFromCookies } from "@/lib/session";
 import { computeExportSizes } from "@/lib/exportSizes";
+import { safeCapture } from "@/lib/analytics";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "../_gallery-shell";
 
@@ -69,6 +70,19 @@ export default async function FavoritesPage({ params }: Props) {
     : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
   const favIds = await listFavoritePhotoIds(token, viewerId);
+
+  // Server-side capture: admin previews are excluded.
+  if (viewerId !== ADMIN_PREVIEW_VIEWER_ID) {
+    safeCapture({
+      distinctId: viewerId,
+      event: "favorites_view",
+      properties: {
+        share_token: token,
+        album_id: album.id,
+        favorites_count: favIds.length,
+      },
+    });
+  }
 
   if (favIds.length === 0) {
     const emptySizes = await computeExportSizes(token, viewerId, album.id);
