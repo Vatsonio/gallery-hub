@@ -5,7 +5,6 @@ import { FileImage, Heart, ImageIcon } from "lucide-react";
 // FileImage is used in both the export-modal options list and the footer
 // save-all button below.
 import MobileTabBar from "@/components/gallery/MobileTabBar";
-import GlassDock from "@/components/gallery/GlassDock";
 import ExportModal, {
   type ExportOption,
   type ExportOptionId,
@@ -111,11 +110,9 @@ export default function GalleryShell({
     [exportSizes],
   );
 
-  // The floating dock is only used for the favorites CTA. "Save all"
-  // lives in the page footer at the bottom of the scroll — less intrusive
-  // and aligns with the user's mental model that the whole-album download
-  // is a low-frequency, end-of-page action.
-  const showFavoritesDock = favoritesCount > 0;
+  // No floating CTA anymore. Both whole-album and favorites exports are
+  // entered from the footer "Save all" button → ExportModal picks the
+  // right scope. Keeps the chrome quiet during browsing.
   const showSaveAllFooter = exportSizes.totalCount > 0;
 
   return (
@@ -148,21 +145,9 @@ export default function GalleryShell({
           </span>
         </footer>
       )}
-      {showFavoritesDock && (
-        <GlassDock
-          variant="favorites"
-          count={favoritesCount}
-          sizeLabel={favoritesSizeLabel}
-          onClick={() => {
-            setPreselect("favorites-original");
-            setExportOpen(true);
-          }}
-        />
-      )}
       <MobileTabBar
         token={token}
         favoritesCount={favoritesCount}
-        liftForDock={showFavoritesDock}
       />
       <ExportModal
         open={exportOpen}
