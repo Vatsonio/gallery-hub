@@ -1,4 +1,6 @@
 export type Variant = "thumb" | "web" | "large";
+/** AVIF mirrors exist only for the web and large variants. */
+export type AvifVariant = "web" | "large";
 
 export function originalKey(albumId: string, photoId: string, ext: string): string {
   return `albums/${albumId}/${photoId}/original.${ext}`;
@@ -6,6 +8,11 @@ export function originalKey(albumId: string, photoId: string, ext: string): stri
 
 export function variantKey(albumId: string, photoId: string, variant: Variant): string {
   return `albums/${albumId}/${photoId}/${variant}.webp`;
+}
+
+/** Path to the AVIF mirror of a web/large variant. */
+export function avifVariantKey(albumId: string, photoId: string, variant: AvifVariant): string {
+  return `albums/${albumId}/${photoId}/${variant}.avif`;
 }
 
 const EXT_MAP: Record<string, string> = {

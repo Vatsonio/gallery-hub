@@ -4,7 +4,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET, ensureBucket } from "@/lib/minio";
 import { handleGenerateDerivatives } from "../../workers/generateDerivatives";
 import { createAlbum, insertPhoto, listPhotos } from "@/lib/albums";
-import { originalKey, variantKey } from "@/lib/keys";
+import { originalKey, variantKey, avifVariantKey } from "@/lib/keys";
 import { createSampleJpeg } from "../fixtures/createSampleJpeg";
 import { runMigrations } from "../../scripts/migrate";
 
@@ -25,7 +25,7 @@ beforeAll(async () => {
 
 describe("handleGenerateDerivatives", () => {
   it.skipIf(process.env.SKIP_TESTCONTAINERS === "1")(
-    "produces 3 variants and flips status to ready",
+    "produces WEBP thumb/web/large + AVIF web/large and flips status to ready",
     async () => {
       const album = await createAlbum({
         title: "Worker Test",
@@ -61,6 +61,8 @@ describe("handleGenerateDerivatives", () => {
       expect(await objectExists(variantKey(album.id, photoId, "thumb"))).toBe(true);
       expect(await objectExists(variantKey(album.id, photoId, "web"))).toBe(true);
       expect(await objectExists(variantKey(album.id, photoId, "large"))).toBe(true);
+      expect(await objectExists(avifVariantKey(album.id, photoId, "web"))).toBe(true);
+      expect(await objectExists(avifVariantKey(album.id, photoId, "large"))).toBe(true);
 
       const photos = await listPhotos(album.id);
       const photo = photos.find((p) => p.id === photoId);

@@ -1,7 +1,7 @@
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET } from "@/lib/minio";
 import { generateVariants, readTakenAt } from "@/lib/images";
-import { variantKey } from "@/lib/keys";
+import { variantKey, avifVariantKey } from "@/lib/keys";
 import { markPhotoReady, writePhotoVariantSizes } from "@/lib/albums";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
@@ -49,6 +49,22 @@ export async function handleGenerateDerivatives(
         Body: variants.large,
         ContentType: "image/webp"
       })
+    ),
+    s3Client.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: avifVariantKey(data.album_id, data.photo_id, "web"),
+        Body: variants.webAvif,
+        ContentType: "image/avif"
+      })
+    ),
+    s3Client.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: avifVariantKey(data.album_id, data.photo_id, "large"),
+        Body: variants.largeAvif,
+        ContentType: "image/avif"
+      })
     )
   ]);
 
@@ -56,6 +72,8 @@ export async function handleGenerateDerivatives(
     thumb: variants.thumb.length,
     web: variants.web.length,
     large: variants.large.length,
+    avifWeb: variants.webAvif.length,
+    avifLarge: variants.largeAvif.length,
   });
   await markPhotoReady(data.photo_id, taken);
 }

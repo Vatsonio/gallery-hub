@@ -4,12 +4,14 @@ import { createSampleJpeg } from "../fixtures/createSampleJpeg";
 import sharp from "sharp";
 
 describe("generateVariants", () => {
-  it("produces thumb/web/large webp with correct max dimensions", async () => {
+  it("produces thumb/web/large webp + AVIF mirrors with correct max dimensions", async () => {
     const input = await createSampleJpeg(4000, 3000);
     const out = await generateVariants(input);
     expect(out.thumb).toBeInstanceOf(Buffer);
     expect(out.web).toBeInstanceOf(Buffer);
     expect(out.large).toBeInstanceOf(Buffer);
+    expect(out.webAvif).toBeInstanceOf(Buffer);
+    expect(out.largeAvif).toBeInstanceOf(Buffer);
 
     const tm = await sharp(out.thumb).metadata();
     expect(tm.format).toBe("webp");
@@ -20,6 +22,16 @@ describe("generateVariants", () => {
 
     const lm = await sharp(out.large).metadata();
     expect(Math.max(lm.width!, lm.height!)).toBeLessThanOrEqual(2400);
+
+    // AVIF mirrors: same max-dimension policy, format heif (sharp reports
+    // AVIF metadata as format=heif with compression=av1).
+    const wam = await sharp(out.webAvif).metadata();
+    expect(wam.format).toBe("heif");
+    expect(Math.max(wam.width!, wam.height!)).toBeLessThanOrEqual(1600);
+
+    const lam = await sharp(out.largeAvif).metadata();
+    expect(lam.format).toBe("heif");
+    expect(Math.max(lam.width!, lam.height!)).toBeLessThanOrEqual(2400);
   });
 
   it("does not upscale: a small source stays small", async () => {

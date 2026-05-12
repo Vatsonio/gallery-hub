@@ -142,14 +142,20 @@ export interface VariantSizes {
   thumb: number;
   web: number;
   large: number;
+  /** Byte size of the AVIF mirror of the web variant. */
+  avifWeb?: number | null;
+  /** Byte size of the AVIF mirror of the large variant. */
+  avifLarge?: number | null;
 }
 
 export async function writePhotoVariantSizes(photoId: string, sizes: VariantSizes): Promise<void> {
   await sql`
     UPDATE photos
-       SET thumb_bytes = ${sizes.thumb},
-           web_bytes   = ${sizes.web},
-           large_bytes = ${sizes.large}
+       SET thumb_bytes      = ${sizes.thumb},
+           web_bytes        = ${sizes.web},
+           large_bytes      = ${sizes.large},
+           avif_bytes_web   = ${sizes.avifWeb ?? null},
+           avif_bytes_large = ${sizes.avifLarge ?? null}
      WHERE id = ${photoId}
   `;
 }
