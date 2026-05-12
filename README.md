@@ -110,3 +110,75 @@ Don't want a second hostname? Switch to a server-side upload proxy: change `Drop
 ## Health check
 
 `GET /api/health` returns `{ db: 'ok'|'fail', minio: 'ok'|'fail' }` and status 200/503 — wire it into Portainer or Cloudflare uptime monitors.
+
+## Analytics — PostHog (self-hosted) + `/chikaq` insights
+
+Two-layer analytics on top of the gallery:
+
+- **`/chikaq`** (admin-gated) — first-party insights drawn straight from Postgres
+  (views trend, top albums, recent activity per viewer). Lives in the same
+  process; survives even if PostHog is down.
+- **PostHog self-hosted** — funnels, retention, session replay, deep cohorting.
+  Embedded inside `/chikaq` via a shared dashboard URL.
+
+### Bring up the PostHog stack
+
+The compose file ships PostHog + dedicated Postgres + Redis + ClickHouse on the
+same `internal` network. They are independent services — start them on demand:
+
+```bash
+docker compose up -d posthog-pg posthog-redis posthog-clickhouse posthog
+```
+
+First boot:
+
+1. Wait ~60 s for ClickHouse and PostHog to settle.
+2. Visit `http://localhost:8000` → create the admin account (this is the
+   PostHog project owner, **not** the gallery admin).
+3. PostHog creates a default project; copy the **Project API key** from
+   *Project Settings → Project API Key*.
+4. Paste it into `.env`:
+
+   ```env
+   POSTHOG_KEY=phc_xxx...
+   POSTHOG_HOST=http://localhost:8000
+   NEXT_PUBLIC_POSTHOG_KEY=phc_xxx...
+   NEXT_PUBLIC_POSTHOG_HOST=http://localhost:8000
+   ```
+5. Build a dashboard inside PostHog (funnels, retention, top events).
+   *Dashboard → Share → toggle "Share dashboard" → copy URL.*
+6. Paste it into `.env` as `POSTHOG_DASHBOARD_URL=...` and reload `/chikaq`
+   — the iframe panel will render the live dashboard.
+
+### Events captured
+
+Server-side (always via `safeCapture` — never throws into a user flow):
+
+- `gallery_view` — public album page render
+- `favorites_view` — `/a/<token>/favorites` render
+- `favorite_added` / `favorite_removed` — heart toggle on a photo
+- `share_unlocked` — password-gated link unlocked
+- `export_started` / `export_completed` — ZIP export of an album or favorites
+
+Client-side (`PostHogProvider` mounted only inside `/a/<token>/*`):
+
+- Automatic `$pageview` + `$pageleave` for SPA navigations
+- Session replay (configured per project inside PostHog UI)
+
+Admin sessions are explicitly opted out — no captures fire while previewing
+albums from `/admin`.
+
+### Resource note
+
+PostHog + ClickHouse together idle at ~1.5 GB RAM. On a small VPS, either
+schedule it (start before reviewing analytics, stop after), or fall back to
+**PostHog Cloud's free tier** by pointing `POSTHOG_HOST` at
+`https://us.posthog.com` (or `eu.posthog.com`) and keeping the rest of the
+gallery stack local.
+
+### `/chikaq`
+
+The admin-gated insights page is at `/chikaq` (admin login required). It shows
+storage tiles, a 30-day views sparkline, top albums by view count, recent
+activity grouped per viewer, the embedded PostHog dashboard, and a one-click
+link to the Cloudflare dashboard for DDoS / IP / geo views.
