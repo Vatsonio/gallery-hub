@@ -5,13 +5,19 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
 }));
 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { presignPut, presignGet, contentDispositionAttachment } from "@/lib/presign";
+import {
+  presignPut,
+  presignGet,
+  contentDispositionAttachment,
+  __resetPresignCache,
+} from "@/lib/presign";
 import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 
 const mocked = vi.mocked(getSignedUrl);
 
 beforeEach(() => {
   mocked.mockReset();
+  __resetPresignCache();
 });
 
 describe("presign", () => {

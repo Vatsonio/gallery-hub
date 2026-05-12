@@ -7,7 +7,7 @@ import {
   unlockCookieName,
 } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet } from "@/lib/presign";
+import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey } from "@/lib/keys";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
@@ -103,7 +103,9 @@ export default async function FavoritesPage({ params }: Props) {
   const decorated = await Promise.all(
     ordered.map(async (p) => ({
       ...p,
-      web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600),
+      web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600, {
+        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+      }),
     })),
   );
 

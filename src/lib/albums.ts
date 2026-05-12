@@ -1,6 +1,6 @@
 import { sql } from "@/lib/db";
 import { randomUUID } from "node:crypto";
-import { presignGet } from "@/lib/presign";
+import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey } from "@/lib/keys";
 import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoRow } from "@/lib/types";
 
@@ -164,6 +164,8 @@ export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
     ORDER BY a.updated_at DESC`;
   return Promise.all(rows.map(async (r) => ({
     ...r,
-    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "web"), 3600) : null,
+    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "web"), 3600, {
+      responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+    }) : null,
   })));
 }

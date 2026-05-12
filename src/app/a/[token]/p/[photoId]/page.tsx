@@ -3,7 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import { sql } from "@/lib/db";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet, contentDispositionAttachment } from "@/lib/presign";
+import {
+  presignGet,
+  contentDispositionAttachment,
+  IMMUTABLE_VARIANT_CACHE_CONTROL,
+} from "@/lib/presign";
 import { variantKey, originalKey } from "@/lib/keys";
 import {
   ADMIN_PREVIEW_VIEWER_ID,
@@ -60,7 +64,9 @@ export default async function PublicPhotoPage({ params }: Props) {
     : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
   const [largeUrl, favIds] = await Promise.all([
-    presignGet(variantKey(album.id, photo.id, "large"), 3600),
+    presignGet(variantKey(album.id, photo.id, "large"), 3600, {
+      responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+    }),
     listFavoritePhotoIds(token, viewerId),
   ]);
 

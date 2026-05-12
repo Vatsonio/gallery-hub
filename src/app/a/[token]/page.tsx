@@ -6,7 +6,7 @@ import {
   unlockCookieName,
 } from "@/lib/share";
 import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet } from "@/lib/presign";
+import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey } from "@/lib/keys";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
@@ -65,7 +65,9 @@ export default async function PublicGalleryPage({ params }: Props) {
     Promise.all(
       photos.map(async (p) => ({
         ...p,
-        web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600),
+        web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600, {
+          responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+        }),
       })),
     ),
     listFavoritePhotoIds(token, viewerId),
@@ -76,7 +78,9 @@ export default async function PublicGalleryPage({ params }: Props) {
   const coverPhoto =
     decorated.find((p) => p.id === album.cover_photo_id) ?? decorated[0] ?? null;
   const coverUrl = coverPhoto
-    ? await presignGet(variantKey(album.id, coverPhoto.id, "large"), 3600)
+    ? await presignGet(variantKey(album.id, coverPhoto.id, "large"), 3600, {
+        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+      })
     : null;
 
   // Compute TWO justified-rows layouts so mobile gets 2-photo rows and desktop

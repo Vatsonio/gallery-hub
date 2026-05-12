@@ -4,7 +4,7 @@ import { ChevronLeft, Heart } from "lucide-react";
 import { sql } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
-import { presignGet } from "@/lib/presign";
+import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey } from "@/lib/keys";
 import { favoriteCountsByPhoto } from "@/lib/favorites";
 
@@ -43,7 +43,9 @@ export default async function SelectionsAlbumPage({
   const tiles = await Promise.all(
     photos.map(async (p) => ({
       id: p.id,
-      thumbUrl: await presignGet(variantKey(album.id, p.id, "thumb"), 3600),
+      thumbUrl: await presignGet(variantKey(album.id, p.id, "thumb"), 3600, {
+        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
+      }),
     })),
   );
 
