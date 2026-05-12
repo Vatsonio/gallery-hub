@@ -99,6 +99,25 @@ body {
   animation: heart-pulse 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+/*
+ * Justified-row container. Off-screen rows are skipped during rendering
+ * (`content-visibility: auto`) which slashes layout/paint time on long
+ * galleries. The intrinsic size hint comes from the per-row height set
+ * inline via the --row-h custom property — without it the browser would
+ * reserve 0px for hidden rows and the scrollbar would jitter as rows
+ * enter/exit the viewport. Width is `auto` so the row can still
+ * flex-grow horizontally.
+ *
+ * Chromium + Safari TP support content-visibility. Firefox treats it as
+ * a no-op (still correct, just no skipping). scrollIntoView still works
+ * because the browser materializes the row when it becomes the scroll
+ * target.
+ */
+.gallery-row {
+  content-visibility: auto;
+  contain-intrinsic-size: var(--row-h, 240px) auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .heart-burst-anim,
   .glass-dock-anim,

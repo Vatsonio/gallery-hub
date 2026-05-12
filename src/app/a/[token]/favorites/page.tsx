@@ -150,8 +150,11 @@ export default async function FavoritesPage({ params }: Props) {
             return (
               <div
                 key={i}
-                className="flex w-full gap-0.5"
-                style={{ height: row.height }}
+                className="gallery-row flex w-full gap-0.5"
+                style={{
+                  height: row.height,
+                  ["--row-h" as string]: `${Math.round(row.height)}px`,
+                }}
               >
                 {row.items.map((item) => (
                   <PhotoTile
@@ -174,7 +177,14 @@ export default async function FavoritesPage({ params }: Props) {
           {desktopRows.map((row, i) => {
             const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
             return (
-              <div key={i} className="flex w-full gap-1" style={{ height: row.height }}>
+              <div
+                key={i}
+                className="gallery-row flex w-full gap-1"
+                style={{
+                  height: row.height,
+                  ["--row-h" as string]: `${Math.round(row.height)}px`,
+                }}
+              >
                 {row.items.map((item) => (
                   <PhotoTile
                     key={item.id}

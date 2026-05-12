@@ -106,11 +106,23 @@ export function PhotoGrid({
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={order} strategy={rectSortingStrategy}>
         <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-6 gap-3 px-1">
-          {tiles.map((t) => (
-            <div className="group mb-3 break-inside-avoid" key={t.id}>
-              <PhotoTile photo={t} onChange={reload} onPreview={setOpenPhotoId} />
-            </div>
-          ))}
+          {tiles.map((t) => {
+            // Intrinsic-size hint for content-visibility. The exact pixel
+            // height is column-width dependent at runtime, so we hand the
+            // browser a reasonable per-tile estimate from the photo's
+            // aspect ratio scaled to a 280px column.
+            const ratio = t.width && t.height ? t.height / t.width : 1;
+            const estH = Math.max(120, Math.round(280 * ratio));
+            return (
+              <div
+                className="group mb-3 break-inside-avoid gallery-row"
+                key={t.id}
+                style={{ ["--row-h" as string]: `${estH}px` }}
+              >
+                <PhotoTile photo={t} onChange={reload} onPreview={setOpenPhotoId} />
+              </div>
+            );
+          })}
         </div>
       </SortableContext>
       {openPhoto && (openPhoto.large_url || openPhoto.web_url) && (
