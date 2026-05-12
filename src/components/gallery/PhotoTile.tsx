@@ -128,10 +128,23 @@ export default function PhotoTile({
   }
 
   function handleClick(e: React.MouseEvent): void {
-    // Desktop mouse path: just navigate. Touch path calls preventDefault
-    // on touchend so this never fires for taps.
+    // Touch path calls preventDefault on touchend so this never fires
+    // for taps — guard anyway.
     if (e.defaultPrevented) return;
-    navigateToPhoto();
+    // Defer navigation by the double-tap window so onDoubleClick has a
+    // chance to claim the gesture as a favorite. onDoubleClick calls
+    // cancelPendingNav() to abort the navigation. detail >= 2 means
+    // this click is the second of a double — abort eagerly so the
+    // navigation doesn't fire on the trailing edge.
+    if (e.detail >= 2) {
+      cancelPendingNav();
+      return;
+    }
+    cancelPendingNav();
+    pendingNavTimer.current = setTimeout(() => {
+      pendingNavTimer.current = null;
+      navigateToPhoto();
+    }, DOUBLE_TAP_WINDOW_MS);
   }
 
   return (
