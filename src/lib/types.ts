@@ -46,6 +46,8 @@ export interface PhotoRow {
   taken_at: string | null;
   status: PhotoStatus;
   created_at: string;
+  /** Base64-encoded ThumbHash placeholder, null until the worker fills it in. */
+  thumbhash?: string | null;
 }
 
 export interface AlbumRow {

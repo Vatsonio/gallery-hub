@@ -148,6 +148,14 @@ export interface VariantSizes {
   avifLarge?: number | null;
 }
 
+/**
+ * Persist the base64-encoded ThumbHash for a photo. Called once per
+ * photo by the derivative worker after the variants are uploaded.
+ */
+export async function writePhotoThumbhash(photoId: string, hash: string): Promise<void> {
+  await sql`UPDATE photos SET thumbhash = ${hash} WHERE id = ${photoId}`;
+}
+
 export async function writePhotoVariantSizes(photoId: string, sizes: VariantSizes): Promise<void> {
   await sql`
     UPDATE photos

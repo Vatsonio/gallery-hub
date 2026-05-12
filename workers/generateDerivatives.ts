@@ -1,8 +1,13 @@
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET } from "@/lib/minio";
 import { generateVariants, readTakenAt } from "@/lib/images";
+import { computeThumbhash } from "@/lib/thumbhash";
 import { variantKey, avifVariantKey } from "@/lib/keys";
-import { markPhotoReady, writePhotoVariantSizes } from "@/lib/albums";
+import {
+  markPhotoReady,
+  writePhotoThumbhash,
+  writePhotoVariantSizes,
+} from "@/lib/albums";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
 async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
@@ -22,8 +27,11 @@ export async function handleGenerateDerivatives(
   if (!obj.Body) throw new Error(`empty body for ${data.key}`);
   const buf = await streamToBuffer(obj.Body as NodeJS.ReadableStream);
 
-  const variants = await generateVariants(buf);
-  const taken = await readTakenAt(buf);
+  const [variants, taken, thumbhash] = await Promise.all([
+    generateVariants(buf),
+    readTakenAt(buf),
+    computeThumbhash(buf),
+  ]);
 
   await Promise.all([
     s3Client.send(
@@ -75,5 +83,6 @@ export async function handleGenerateDerivatives(
     avifWeb: variants.webAvif.length,
     avifLarge: variants.largeAvif.length,
   });
+  await writePhotoThumbhash(data.photo_id, thumbhash);
   await markPhotoReady(data.photo_id, taken);
 }

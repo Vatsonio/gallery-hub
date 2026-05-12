@@ -25,6 +25,12 @@ interface Props {
    * loading="lazy". Reserve for the first row of the grid.
    */
   priority?: boolean;
+  /**
+   * Pre-decoded ThumbHash PNG (as a data: URL). Rendered behind the
+   * real image and faded out via onLoad so users see a blurry preview
+   * instantly instead of the empty bg-white/5 placeholder.
+   */
+  thumbhashDataUrl?: string | null;
 }
 
 const DOUBLE_TAP_WINDOW_MS = 280;
@@ -51,10 +57,12 @@ export default function PhotoTile({
   index = 0,
   className,
   priority = false,
+  thumbhashDataUrl,
 }: Props) {
   const router = useRouter();
   const [favorited, setFavorited] = useState(initialFavorited);
   const [burst, setBurst] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   const [, startTransition] = useTransition();
   const inflight = useRef(false);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,6 +198,15 @@ export default function PhotoTile({
         commitToggle(true);
       }}
     >
+      {thumbhashDataUrl ? (
+        <img
+          src={thumbhashDataUrl}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-0" : "opacity-100"}`}
+        />
+      ) : null}
       <img
         ref={imgRef}
         src={webUrl}
@@ -198,7 +215,8 @@ export default function PhotoTile({
         decoding={priority ? "sync" : "async"}
         fetchPriority={priority ? "high" : "auto"}
         draggable={false}
-        className="h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04]"
+        onLoad={() => setLoaded(true)}
+        className={`relative h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
       />
       <HeartBurst trigger={burst} />
       <HeartOverlay favorited={favorited} onClick={onHeartClick} />

@@ -8,6 +8,7 @@ import {
 import { listPhotos, getAlbumById } from "@/lib/albums";
 import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey } from "@/lib/keys";
+import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
   ADMIN_PREVIEW_VIEWER_ID,
@@ -68,6 +69,7 @@ export default async function PublicGalleryPage({ params }: Props) {
         web_url: await presignGet(variantKey(album.id, p.id, "web"), 3600, {
           responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
         }),
+        thumbhash_url: thumbhashToDataUrl(p.thumbhash),
       })),
     ),
     listFavoritePhotoIds(token, viewerId),
@@ -208,6 +210,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           photoId={item.id}
                           href={`/a/${token}/p/${item.id}`}
                           webUrl={photoMap.get(item.id)!.web_url}
+                          thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
                           index={photoIndex.get(item.id) ?? 0}
@@ -238,6 +241,7 @@ export default async function PublicGalleryPage({ params }: Props) {
                           photoId={item.id}
                           href={`/a/${token}/p/${item.id}`}
                           webUrl={photoMap.get(item.id)!.web_url}
+                          thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
                           flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                           initialFavorited={favSet.has(item.id)}
                           index={photoIndex.get(item.id) ?? 0}
