@@ -38,6 +38,8 @@
     "next": "^15.0.0",
     "pg-boss": "^10.4.2",
     "postgres": "^3.4.5",
+    "posthog-js": "^1.373.2",
+    "posthog-node": "^5.33.7",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
