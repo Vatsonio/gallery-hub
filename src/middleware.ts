@@ -8,9 +8,12 @@ import { sessionOptions, type AdminSession } from "@/lib/session";
 const VIEWER_COOKIE = "gh_viewer";
 
 export function shouldProtect(pathname: string): boolean {
-  if (!pathname.startsWith("/admin")) return false;
+  // /chikaq is the admin-only insights surface — gate it identically to /admin/*
+  // (any path inside /chikaq, but never the admin login page itself).
   if (pathname === "/admin/login") return false;
-  return true;
+  if (pathname.startsWith("/admin")) return true;
+  if (pathname === "/chikaq" || pathname.startsWith("/chikaq/")) return true;
+  return false;
 }
 
 // Match `/a/<token>` and `/a/<token>/<anything>` so we can mint a gh_viewer
@@ -72,5 +75,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/a/:path*"],
+  matcher: ["/admin/:path*", "/a/:path*", "/chikaq", "/chikaq/:path*"],
 };

@@ -17,4 +17,10 @@ describe("shouldProtect", () => {
     expect(shouldProtect("/a/abc123")).toBe(false);
     expect(shouldProtect("/api/health")).toBe(false);
   });
+
+  it("protects /chikaq and nested chikaq routes", () => {
+    expect(shouldProtect("/chikaq")).toBe(true);
+    expect(shouldProtect("/chikaq/")).toBe(true);
+    expect(shouldProtect("/chikaq/anything")).toBe(true);
+  });
 });

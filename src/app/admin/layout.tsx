@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Heart, Images, LogOut } from "lucide-react";
+import { Activity, Heart, Images, LogOut } from "lucide-react";
 import { logoutAction } from "./logout/actions";
 import { getAdminSession } from "@/lib/session";
 
@@ -14,6 +14,7 @@ const NAV = [
     title: "Insights",
     items: [
       { href: "/admin/selections", label: "Client Selections", icon: Heart },
+      { href: "/chikaq", label: "Insights", icon: Activity },
     ]
   }
 ];
