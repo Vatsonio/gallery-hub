@@ -170,7 +170,13 @@ export default function Lightbox({
           alt=""
           draggable={false}
           className="max-h-screen max-w-full object-contain transition-transform"
-          style={{ transform: touchTranslate ? `translateX(${touchTranslate}px)` : undefined }}
+          style={{
+            transform: touchTranslate ? `translateX(${touchTranslate}px)` : undefined,
+            // Pair with PhotoTile's view-transition-name so a supporting
+            // browser morphs the tile into this hero. The name must be
+            // unique per page; we use the photoId from the route.
+            viewTransitionName: `photo-${photoId}`,
+          }}
           onDoubleClick={(e) => {
             // Desktop fallback for double-tap.
             e.preventDefault();

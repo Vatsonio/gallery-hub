@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import HeartBurst from "./HeartBurst";
 import HeartOverlay from "./HeartOverlay";
 import { toggleFavorite } from "@/app/a/[token]/_actions";
+import { startViewTransition, setViewTransitionName } from "@/lib/view-transition";
 
 interface Props {
   token: string;
@@ -58,6 +59,7 @@ export default function PhotoTile({
   const inflight = useRef(false);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     return () => {
@@ -86,7 +88,19 @@ export default function PhotoTile({
 
   function navigateToPhoto(): void {
     rememberReturnScroll();
-    router.push(href);
+    // Tag the tile <img> with a unique view-transition-name so a
+    // supporting browser can morph it into the lightbox hero. Only the
+    // currently-clicked tile gets the name (set right before navigation,
+    // cleared on unmount via cleanup ref) — applying it to every tile
+    // would trigger duplicate-name warnings.
+    const cleanup = setViewTransitionName(imgRef.current, `photo-${photoId}`);
+    startViewTransition(() => {
+      router.push(href);
+    });
+    // Schedule cleanup well after the transition would have finished.
+    // Even if the user navigates back before then, React unmount will
+    // null the style anyway.
+    window.setTimeout(cleanup, 800);
   }
 
   function commitToggle(intent: boolean): void {
@@ -177,6 +191,7 @@ export default function PhotoTile({
       }}
     >
       <img
+        ref={imgRef}
         src={webUrl}
         alt=""
         loading={priority ? "eager" : "lazy"}
