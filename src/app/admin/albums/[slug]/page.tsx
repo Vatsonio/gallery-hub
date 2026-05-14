@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
 import { StatsStrip } from "@/components/admin/StatsStrip";
 import AlbumUploadAndGrid from "@/components/admin/AlbumUploadAndGrid";
-import { AlbumForm } from "@/components/admin/AlbumForm";
+import { AlbumSettingsPanel } from "@/components/admin/AlbumSettingsPanel";
 import { Badge } from "@/components/ui/badge";
 import { ShareLinkCard } from "@/components/admin/ShareLinkCard";
 import { createShareLink } from "@/lib/share-actions";
@@ -53,7 +53,15 @@ export default async function AlbumDetailPage({ params }: Props) {
     <div className="space-y-8 p-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Badge className="mb-2 bg-zinc-800 text-zinc-300">{album.status}</Badge>
+          <div className="mb-2 flex items-center gap-2">
+            <Badge className="bg-zinc-800 text-zinc-300">{album.status}</Badge>
+            {album.cover_photo_id && (
+              <Badge className="bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/30">Cover set</Badge>
+            )}
+            {album.watermark_enabled && (
+              <Badge className="bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/30">Watermark on</Badge>
+            )}
+          </div>
           <h1 className="text-2xl font-light tracking-wide text-white">{album.title}</h1>
           {album.subtitle && <p className="text-sm text-zinc-400">{album.subtitle}</p>}
         </div>
@@ -72,9 +80,7 @@ export default async function AlbumDetailPage({ params }: Props) {
 
       <section className="border-t border-white/5 pt-8">
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Settings</h2>
-        <div className="max-w-xl">
-          <AlbumForm mode="edit" initial={{ id: album.id, title: album.title, subtitle: album.subtitle, status: album.status }} />
-        </div>
+        <AlbumSettingsPanel album={album} />
       </section>
     </div>
   );
