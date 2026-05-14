@@ -25,7 +25,8 @@ describe.skipIf(dockerOff)("runMigrations", () => {
         "008_photo_variant_sizes.sql",
         "009_view_events_details.sql",
         "010_photo_variant_avif.sql",
-        "011_photo_thumbhash.sql"
+        "011_photo_thumbhash.sql",
+        "012_album_watermark.sql"
       ]);
 
       const tables = await sql<{ table_name: string }[]>`
