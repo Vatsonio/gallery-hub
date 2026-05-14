@@ -23,6 +23,8 @@ import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { VIEWER_COOKIE } from "@/lib/viewer";
 import { createRateLimiter } from "@/lib/rateLimiter";
 import { safeCapture } from "@/lib/analytics";
+import { notifyExportStarted, notifyExportCompleted } from "@/lib/notifications";
+import { getAlbumById } from "@/lib/albums";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,6 +116,18 @@ export async function GET(
     event: "export_started",
     properties: { share_token: token, scope, variant },
   });
+  // Telegram notification (fire-and-forget; never blocks the export).
+  // Resolved lazily so a slow album lookup doesn't delay the zip stream.
+  const albumForNotify = await getAlbumById(status.link.album_id).catch(() => null);
+  if (albumForNotify) {
+    void notifyExportStarted({
+      album_title: albumForNotify.title,
+      share_token: token,
+      viewer_id: viewerId,
+      scope,
+      variant,
+    });
+  }
 
   // Resolve the photo set.
   let photos: PhotoRow[];
@@ -158,6 +172,17 @@ export async function GET(
           cache_hit: true,
         },
       });
+      if (albumForNotify) {
+        void notifyExportCompleted({
+          album_title: albumForNotify.title,
+          share_token: token,
+          viewer_id: viewerId,
+          scope,
+          variant,
+          total_bytes: cachedBytes,
+          cache_hit: true,
+        });
+      }
       return NextResponse.redirect(presigned, 302);
     }
   } catch {
@@ -225,6 +250,17 @@ export async function GET(
       cache_hit: false,
     },
   });
+  if (albumForNotify) {
+    void notifyExportCompleted({
+      album_title: albumForNotify.title,
+      share_token: token,
+      viewer_id: viewerId,
+      scope,
+      variant,
+      total_bytes: totalBytes,
+      cache_hit: false,
+    });
+  }
 
   // Cast PassThrough → web ReadableStream. Node's `Readable.toWeb` would be
   // ideal but Next 15 happily accepts a Node Readable here.

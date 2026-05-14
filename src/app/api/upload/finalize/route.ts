@@ -3,6 +3,7 @@ import { requireAdminSession } from "@/lib/session";
 import { getAlbumById, insertPhoto } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
+import { notifyNewUpload } from "@/lib/notifications";
 import type { FinalizeRequestBody, FinalizeResponse, GenerateDerivativesJobData } from "@/lib/types";
 
 function inferExt(filename: string): string {
@@ -49,6 +50,13 @@ export async function POST(req: Request): Promise<Response> {
     };
     await boss.send(GENERATE_DERIVATIVES_QUEUE, job);
     inserted++;
+  }
+  if (inserted > 0) {
+    void notifyNewUpload({
+      album_id: album.id,
+      album_title: album.title,
+      photo_count: inserted,
+    });
   }
   const resp: FinalizeResponse = { inserted };
   return NextResponse.json(resp);

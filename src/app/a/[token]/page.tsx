@@ -1,6 +1,10 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { sql } from "@/lib/db";
+import {
+  notifyFirstShareView,
+  recordIpTokenHit,
+} from "@/lib/notifications";
 import {
   resolveShareLinkStatus,
   unlockCookieName,
@@ -130,6 +134,17 @@ export default async function PublicGalleryPage({ params }: Props) {
   // log here because viewerId === ADMIN_PREVIEW_VIEWER_ID; we still
   // guard explicitly so an accidental sentinel write is a no-op.
   if (viewerId !== ADMIN_PREVIEW_VIEWER_ID) {
+    // Detect first-ever view for this share token BEFORE the insert,
+    // so the dedup check below doesn't race against it. Notifications
+    // are fire-and-forget — we don't await the dispatch.
+    const priorViews = await sql<{ n: string }[]>`
+      SELECT COUNT(*)::text AS n
+        FROM view_events
+       WHERE share_token = ${token}
+         AND event_type = 'page_view'
+    `.catch(() => [{ n: "1" }] as { n: string }[]);
+    const isFirstView = Number(priorViews[0]?.n ?? "0") === 0;
+
     await sql`
       INSERT INTO view_events (share_token, viewer_id, event_type)
       SELECT ${token}, ${viewerId}, 'page_view'
@@ -151,6 +166,26 @@ export default async function PublicGalleryPage({ params }: Props) {
         photo_count: decorated.length,
       },
     });
+
+    if (isFirstView) {
+      void notifyFirstShareView({
+        album_title: album.title,
+        share_token: token,
+        viewer_id: viewerId,
+      });
+    }
+
+    // Suspicious-IP detection. The IP comes from CF-Connecting-IP behind
+    // Cloudflare; fall back to X-Forwarded-For's first hop, then the
+    // empty string (skip detection if no header is present).
+    const h = await headers();
+    const ip =
+      h.get("cf-connecting-ip") ??
+      h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      "";
+    if (ip) {
+      void recordIpTokenHit(ip, token);
+    }
   }
 
   const exportSizes = await computeExportSizes(token, viewerId, album.id);

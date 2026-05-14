@@ -13,6 +13,9 @@ import { toggleFavoriteForViewer } from "@/lib/favorites";
 import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
 import { requireAdminSessionFromCookies } from "@/lib/session";
 import { safeCapture } from "@/lib/analytics";
+import { notifyFavoritesBurst } from "@/lib/notifications";
+import { sql } from "@/lib/db";
+import { getAlbumById } from "@/lib/albums";
 import { randomUUID } from "node:crypto";
 
 export interface ToggleFavoriteResult {
@@ -88,6 +91,30 @@ export async function toggleFavorite(
       photo_id: photoId,
     },
   });
+
+  // Notify on a burst of likes. Threshold logic lives in
+  // notifyFavoritesBurst — it queries the rule row + the rolling-hour
+  // count itself. We only run when the toggle ADDED (not on remove)
+  // and dedup_key collapses repeats inside the hour bucket.
+  if (res.state === "added") {
+    const album = await getAlbumById(status.link.album_id).catch(() => null);
+    if (album) {
+      const countRows = await sql<{ n: string }[]>`
+        SELECT COUNT(*)::text AS n
+          FROM favorites
+         WHERE share_token = ${token}
+           AND viewer_id = ${viewerId}
+           AND created_at > NOW() - INTERVAL '1 hour'
+      `.catch(() => [{ n: "0" }] as { n: string }[]);
+      const count = Number(countRows[0]?.n ?? "0");
+      void notifyFavoritesBurst({
+        album_title: album.title,
+        share_token: token,
+        viewer_id: viewerId,
+        count,
+      });
+    }
+  }
   return { favorited: res.state === "added" };
 }
 
