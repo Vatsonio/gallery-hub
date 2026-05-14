@@ -330,6 +330,99 @@ services:
       - gallery-internal
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Encrypted Postgres backup runner. Cron fires deploy/scripts/pg-backup.sh
+  # daily; dumps land in gallery_backups_prod (mounted at /backups). See
+  # docs/backup.md for restore procedure.
+  # ──────────────────────────────────────────────────────────────────────────
+  gallery-backup:
+    build:
+      context: .
+      dockerfile: deploy/backup/Dockerfile
+    image: ${GALLERY_BACKUP_IMAGE:-gallery-hub-backup:local}
+    container_name: gallery-backup
+    restart: unless-stopped
+    environment:
+      BACKUP_ROLE: pg
+      SCHEDULE_PG: ${BACKUP_SCHEDULE_PG:-0 3 * * *}
+      POSTGRES_HOST: gallery-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-gallery}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-gallery_hub}
+      BACKUP_GPG_PASSPHRASE: ${BACKUP_GPG_PASSPHRASE:?BACKUP_GPG_PASSPHRASE is required}
+      BACKUP_DIR: /backups
+      KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+    volumes:
+      - gallery_backups_prod:/backups
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+    security_opt: *default-security
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    networks:
+      - gallery-internal
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # MinIO → cold-storage mirror. Reads BACKUP_TARGET (b2|r2|local) and runs
+  # `mc mirror` on a cron. Append-only by design (no --remove) so a
+  # compromised primary can't cascade into the offsite copy. See
+  # docs/backup.md.
+  # ──────────────────────────────────────────────────────────────────────────
+  gallery-mirror:
+    build:
+      context: .
+      dockerfile: deploy/backup/Dockerfile
+    image: ${GALLERY_BACKUP_IMAGE:-gallery-hub-backup:local}
+    container_name: gallery-mirror
+    restart: unless-stopped
+    environment:
+      BACKUP_ROLE: mirror
+      SCHEDULE_MIRROR: ${BACKUP_SCHEDULE_MIRROR:-0 4 * * *}
+      # Source — always the in-cluster MinIO. Uses the same access keys the
+      # app uses (read access is sufficient).
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gallery-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
+      # Cold-storage destination selector.
+      BACKUP_TARGET: ${BACKUP_TARGET:-local}
+      # Backblaze B2 (when BACKUP_TARGET=b2)
+      B2_KEY_ID: ${B2_KEY_ID:-}
+      B2_APP_KEY: ${B2_APP_KEY:-}
+      B2_BUCKET: ${B2_BUCKET:-}
+      B2_ENDPOINT: ${B2_ENDPOINT:-}
+      # Cloudflare R2 (when BACKUP_TARGET=r2)
+      R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
+      R2_SECRET_KEY: ${R2_SECRET_KEY:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      # Local (when BACKUP_TARGET=local) — written into /mirror inside the
+      # container, which maps to gallery_mirror_prod.
+      LOCAL_MIRROR_DIR: /mirror
+    volumes:
+      - gallery_backups_prod:/backups
+      - gallery_mirror_prod:/mirror
+    depends_on:
+      gallery-minio:
+        condition: service_healthy
+    security_opt: *default-security
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    networks:
+      - gallery-internal
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Cloudflare Tunnel — the only path traffic reaches the stack.
   # Two run modes:
   #   1. Token mode (simpler): set CF_TUNNEL_TOKEN in .env.prod.
@@ -369,6 +462,10 @@ volumes:
     name: gallery_pgdata_prod
   gallery_miniodata_prod:
     name: gallery_miniodata_prod
+  gallery_backups_prod:
+    name: gallery_backups_prod
+  gallery_mirror_prod:
+    name: gallery_mirror_prod
   posthog_pgdata_prod:
     name: posthog_pgdata_prod
   posthog_redisdata_prod:
