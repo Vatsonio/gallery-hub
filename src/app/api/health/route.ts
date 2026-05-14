@@ -5,6 +5,10 @@ import { HeadBucketCommand } from "@aws-sdk/client-s3";
 
 export const dynamic = "force-dynamic";
 
+// Process start time captured at module load. Used to surface uptime_s for
+// uptime monitors (Cloudflare healthcheck, Portainer, external probes).
+const PROCESS_STARTED_AT_MS: number = Date.now();
+
 async function dbStatus(): Promise<"ok" | "fail"> {
   try {
     await sql`SELECT 1`;
@@ -23,8 +27,20 @@ async function minioStatus(): Promise<"ok" | "fail"> {
   }
 }
 
-export async function GET(): Promise<NextResponse> {
+export interface HealthResponse {
+  db: "ok" | "fail";
+  minio: "ok" | "fail";
+  uptime_s: number;
+  version: string;
+}
+
+export async function GET(): Promise<NextResponse<HealthResponse>> {
   const [db, minio] = await Promise.all([dbStatus(), minioStatus()]);
   const healthy = db === "ok" && minio === "ok";
-  return NextResponse.json({ db, minio }, { status: healthy ? 200 : 503 });
+  const uptime_s = Math.floor((Date.now() - PROCESS_STARTED_AT_MS) / 1000);
+  const version = process.env.APP_VERSION ?? "dev";
+  return NextResponse.json<HealthResponse>(
+    { db, minio, uptime_s, version },
+    { status: healthy ? 200 : 503 }
+  );
 }

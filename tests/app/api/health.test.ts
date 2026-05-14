@@ -24,4 +24,20 @@ describe.skipIf(dockerOff)("GET /api/health", () => {
     expect(body.minio).toBe("ok");
     expect(res.status).toBe(200);
   });
+
+  it("returns the documented response shape with uptime_s and version", async () => {
+    const res = await GET();
+    const body = await res.json();
+    expect(body).toEqual(
+      expect.objectContaining({
+        db: expect.any(String),
+        minio: expect.any(String),
+        uptime_s: expect.any(Number),
+        version: expect.any(String)
+      })
+    );
+    expect(body.uptime_s).toBeGreaterThanOrEqual(0);
+    expect(["ok", "fail"]).toContain(body.db);
+    expect(["ok", "fail"]).toContain(body.minio);
+  });
 });
