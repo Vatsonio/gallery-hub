@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowUpRight,
   Camera,
+  Database,
   Download,
   Eye,
   HardDrive,
@@ -23,6 +24,7 @@ import {
   type RecentActivityRow,
   type ViewsTrendPoint,
 } from "@/lib/widgetQuery";
+import { getStorageUsage, type StorageUsage } from "@/lib/storage-monitor";
 import { logoutAction } from "@/app/admin/logout/actions";
 
 export const dynamic = "force-dynamic";
@@ -131,11 +133,19 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
   const auth = await requireAdminSessionFromCookies();
   if (!auth.ok) redirect("/admin/login?next=/chikaq");
 
-  const [stats, trendRaw, topAlbums, activity] = await Promise.all([
+  // Storage usage walks the bucket — guard it so a slow/broken MinIO can't
+  // 500 the whole dashboard. Failure → null and the Storage card renders a
+  // diagnostic stub instead.
+  const storagePromise: Promise<StorageUsage | null> = getStorageUsage().catch((err) => {
+    console.error("[chikaq] storage usage failed", err);
+    return null;
+  });
+  const [stats, trendRaw, topAlbums, activity, storage] = await Promise.all([
     loadInsightsStats(),
     loadViewsTrend30d(),
     loadTopAlbums30d(5),
     loadRecentActivity24h(20),
+    storagePromise,
   ]);
   const trend = fill30Days(trendRaw);
   const totalViews = trend.reduce((s, p) => s + p.views, 0);
@@ -275,6 +285,11 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
           </Panel>
         </section>
 
+        {/* Storage usage */}
+        <section>
+          <StorageCard storage={storage} />
+        </section>
+
         {/* PostHog embed */}
         <section>
           <Panel title="Deep analytics" subtitle="PostHog dashboard" Icon={Sparkles}>
@@ -360,6 +375,73 @@ function Tile({
         </p>
       </div>
     </div>
+  );
+}
+
+function formatRelativeTimestamp(iso: string | null): string {
+  if (!iso) return "never";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "unknown";
+  return `${relativeTime(at)} (${at.toISOString().replace("T", " ").slice(0, 19)} UTC)`;
+}
+
+function StorageCard({ storage }: { storage: StorageUsage | null }): React.JSX.Element {
+  if (!storage) {
+    return (
+      <Panel title="Storage" subtitle="usage + backup status" Icon={Database}>
+        <p className="text-sm text-text-muted">
+          Could not read storage usage — check the gallery-app logs. MinIO or
+          Postgres may be unreachable.
+        </p>
+      </Panel>
+    );
+  }
+  const rows: Array<{ label: string; value: string; sub?: string }> = [
+    {
+      label: "MinIO bucket",
+      value: formatBytes(storage.minio_bytes),
+      sub: `${storage.minio_objects.toLocaleString()} objects`,
+    },
+    {
+      label: "Photos (originals)",
+      value: formatBytes(storage.photos_orig_bytes_sum),
+      sub: "SUM(orig_bytes) FROM photos",
+    },
+    {
+      label: "Postgres DB",
+      value: formatBytes(storage.postgres_db_size_bytes),
+      sub: "pg_database_size(current_database())",
+    },
+    {
+      label: "Last backup",
+      value: formatRelativeTimestamp(storage.last_backup_at),
+      sub: "deploy/scripts/pg-backup.sh",
+    },
+    {
+      label: "Last mirror",
+      value: formatRelativeTimestamp(storage.last_mirror_at),
+      sub: "deploy/scripts/minio-mirror.sh",
+    },
+  ];
+  return (
+    <Panel title="Storage" subtitle="usage + backup status" Icon={Database}>
+      <ul className="divide-y divide-line text-sm">
+        {rows.map((r) => (
+          <li
+            key={r.label}
+            className="flex items-baseline justify-between gap-4 py-2 first:pt-0 last:pb-0"
+          >
+            <div className="min-w-0">
+              <p className="text-text/90">{r.label}</p>
+              {r.sub ? (
+                <p className="text-[10px] text-text-muted/70">{r.sub}</p>
+              ) : null}
+            </div>
+            <span className="tabular-nums text-text">{r.value}</span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 
