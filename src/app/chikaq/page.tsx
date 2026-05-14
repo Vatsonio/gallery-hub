@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   Activity,
   ArrowUpRight,
+  Bell,
   Camera,
   Database,
   Download,
@@ -173,6 +174,13 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
               Last 30 days · refreshed {refreshedAt}
             </p>
           </div>
+          <Link
+            href="/admin/notifications"
+            className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-line bg-bg-card hover:bg-bg-elevated px-3 py-1.5 text-sm transition"
+          >
+            <Bell className="size-4" />
+            Notification settings
+          </Link>
           <Link
             href="/admin/albums"
             className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-line bg-bg-card hover:bg-bg-elevated px-3 py-1.5 text-sm transition"
