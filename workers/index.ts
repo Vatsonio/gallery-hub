@@ -3,10 +3,12 @@ import {
   GENERATE_DERIVATIVES_QUEUE,
   REAP_DELETED_ALBUMS_QUEUE,
   REAP_STALE_EXPORTS_QUEUE,
+  STORAGE_USAGE_CHECK_QUEUE,
 } from "@/lib/jobs";
 import { handleGenerateDerivatives } from "./generateDerivatives";
 import { handleReap } from "./reaper";
 import { reapStaleExports } from "./exportReaper";
+import { checkStorageQuota } from "@/lib/storage-monitor";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
 async function main(): Promise<void> {
@@ -39,8 +41,20 @@ async function main(): Promise<void> {
     console.log(`[worker] export-reaper scanned=${r.scanned} deleted=${r.deleted}`);
   });
 
+  await boss.work(STORAGE_USAGE_CHECK_QUEUE, async () => {
+    const r = await checkStorageQuota();
+    if (r.skipped) {
+      console.log("[worker] storage-quota check skipped (no STORAGE_QUOTA_BYTES)");
+    } else {
+      console.log(
+        `[worker] storage-quota used=${r.used_bytes}B quota=${r.quota_bytes}B pct=${r.used_pct?.toFixed(1)} emitted=${r.emitted}`,
+      );
+    }
+  });
+
   await boss.schedule(REAP_DELETED_ALBUMS_QUEUE, "0 * * * *");
   await boss.schedule(REAP_STALE_EXPORTS_QUEUE, "0 */6 * * *");
+  await boss.schedule(STORAGE_USAGE_CHECK_QUEUE, "0 * * * *");
 
   for (const sig of ["SIGTERM", "SIGINT"] as const) {
     process.on(sig, async () => {
