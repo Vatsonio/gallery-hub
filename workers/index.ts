@@ -4,10 +4,12 @@ import {
   REAP_DELETED_ALBUMS_QUEUE,
   REAP_STALE_EXPORTS_QUEUE,
   STORAGE_USAGE_CHECK_QUEUE,
+  NOTIFICATIONS_QUEUE,
 } from "@/lib/jobs";
 import { handleGenerateDerivatives } from "./generateDerivatives";
 import { handleReap } from "./reaper";
 import { reapStaleExports } from "./exportReaper";
+import { handleNotificationJob } from "./notifications";
 import { checkStorageQuota } from "@/lib/storage-monitor";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
@@ -49,6 +51,18 @@ async function main(): Promise<void> {
       console.log(
         `[worker] storage-quota used=${r.used_bytes}B quota=${r.quota_bytes}B pct=${r.used_pct?.toFixed(1)} emitted=${r.emitted}`,
       );
+    }
+  });
+
+  await boss.work<{ logId: string }>(NOTIFICATIONS_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      try {
+        const outcome = await handleNotificationJob(job.data.logId);
+        console.log(`[worker] notification ${job.data.logId} → ${outcome.status}`);
+      } catch (err) {
+        console.error("[worker] notification FAILED", job.id, err);
+        throw err;
+      }
     }
   });
 
