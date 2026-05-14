@@ -64,6 +64,10 @@ export interface AlbumRow {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  /** When true, `web` + `large` variants are stamped on derivative generation. */
+  watermark_enabled?: boolean;
+  /** Wordmark text rendered onto the watermarked variants. Falls back to a default. */
+  watermark_text?: string | null;
 }
 
 export interface AlbumWithStats extends AlbumRow {

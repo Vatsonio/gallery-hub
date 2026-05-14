@@ -1,7 +1,9 @@
+import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { sql } from "@/lib/db";
 import { randomUUID } from "node:crypto";
 import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey } from "@/lib/keys";
+import { variantKey, avifVariantKey, originalKey } from "@/lib/keys";
+import { s3Client, BUCKET } from "@/lib/minio";
 import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoRow } from "@/lib/types";
 
 function slugify(input: string): string {
@@ -61,6 +63,8 @@ export interface UpdateAlbumInput {
   title?: string;
   subtitle?: string | null;
   status?: AlbumStatus;
+  watermarkEnabled?: boolean;
+  watermarkText?: string | null;
 }
 export async function updateAlbum(id: string, patch: UpdateAlbumInput): Promise<void> {
   await sql`
@@ -68,8 +72,22 @@ export async function updateAlbum(id: string, patch: UpdateAlbumInput): Promise<
       title    = COALESCE(${patch.title ?? null}, title),
       subtitle = CASE WHEN ${patch.subtitle === undefined} THEN subtitle ELSE ${patch.subtitle ?? null} END,
       status   = COALESCE(${patch.status ?? null}, status),
+      watermark_enabled = CASE WHEN ${patch.watermarkEnabled === undefined} THEN watermark_enabled ELSE ${patch.watermarkEnabled ?? false} END,
+      watermark_text    = CASE WHEN ${patch.watermarkText === undefined} THEN watermark_text ELSE ${patch.watermarkText ?? null} END,
       updated_at = now()
     WHERE id = ${id}`;
+}
+
+export interface AlbumWatermark {
+  enabled: boolean;
+  text: string | null;
+}
+
+export async function getAlbumWatermark(albumId: string): Promise<AlbumWatermark> {
+  const rows = await sql<{ watermark_enabled: boolean; watermark_text: string | null }[]>`
+    SELECT watermark_enabled, watermark_text FROM albums WHERE id = ${albumId} LIMIT 1`;
+  const r = rows[0];
+  return { enabled: r?.watermark_enabled ?? false, text: r?.watermark_text ?? null };
 }
 
 export async function softDeleteAlbum(id: string): Promise<void> {
@@ -128,6 +146,152 @@ export async function reorderPhotos(albumId: string, orderedIds: string[]): Prom
 
 export async function deletePhoto(photoId: string): Promise<void> {
   await sql`DELETE FROM photos WHERE id = ${photoId}`;
+}
+
+/**
+ * Hard-delete a batch of photos in one transaction. Matches the existing
+ * single-photo delete pattern (no soft-delete column on `photos`); the
+ * MinIO objects keyed under `albums/<albumId>/<photoId>/` get reaped by
+ * the existing reaper when the album is dropped, but for an in-album bulk
+ * delete we should clean the objects up here so storage doesn't bloat.
+ *
+ * If `photoIds` is empty this is a no-op.
+ */
+export async function bulkDeletePhotos(albumId: string, photoIds: string[]): Promise<void> {
+  if (photoIds.length === 0) return;
+  await sql`DELETE FROM photos WHERE album_id = ${albumId} AND id IN ${sql(photoIds)}`;
+  // Also clear cover_photo_id if it pointed at a deleted photo.
+  await sql`UPDATE albums SET cover_photo_id = NULL
+    WHERE id = ${albumId} AND cover_photo_id IS NOT NULL
+      AND cover_photo_id IN ${sql(photoIds)}`;
+}
+
+interface MoveObjectPlan {
+  from: string;
+  to: string;
+}
+
+/**
+ * Object-storage keys include the album id (see src/lib/keys.ts), so a
+ * cross-album move can't simply update the FK — the variant/original
+ * objects must be copied to keys under the new album then deleted from
+ * the old. We do the S3 work first (the slow + failure-prone half); if
+ * any copy fails we abort before touching the DB. If a *delete* fails
+ * after a successful copy we still update the DB and log — the orphan
+ * old-album object will be swept by the reaper when its source album is
+ * eventually deleted, or never (storage cost is one-time and bounded).
+ */
+export async function bulkMovePhotos(
+  srcAlbumId: string,
+  dstAlbumId: string,
+  photoIds: string[],
+): Promise<void> {
+  if (photoIds.length === 0) return;
+  if (srcAlbumId === dstAlbumId) return;
+
+  // Build the copy plan: for each photo, original.* + thumb/web/large WEBP +
+  // web/large AVIF mirrors. The original's extension is recovered by HEAD
+  // since it's not stored in the photos table.
+  const variants = ["thumb", "web", "large"] as const;
+  const avifVariants = ["web", "large"] as const;
+
+  const plans: MoveObjectPlan[] = [];
+  for (const pid of photoIds) {
+    // Discover the original's extension by listing the candidate keys; HEAD
+    // each plausible extension (jpg/png/webp) until one resolves.
+    let origExt: string | null = null;
+    for (const ext of ["jpg", "png", "webp"] as const) {
+      const key = originalKey(srcAlbumId, pid, ext);
+      try {
+        await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+        origExt = ext;
+        break;
+      } catch {
+        // Not this one — try the next.
+      }
+    }
+    if (origExt) {
+      plans.push({
+        from: originalKey(srcAlbumId, pid, origExt),
+        to: originalKey(dstAlbumId, pid, origExt),
+      });
+    }
+    for (const v of variants) {
+      plans.push({
+        from: variantKey(srcAlbumId, pid, v),
+        to: variantKey(dstAlbumId, pid, v),
+      });
+    }
+    for (const v of avifVariants) {
+      plans.push({
+        from: avifVariantKey(srcAlbumId, pid, v),
+        to: avifVariantKey(dstAlbumId, pid, v),
+      });
+    }
+  }
+
+  const copied: MoveObjectPlan[] = [];
+  try {
+    for (const p of plans) {
+      try {
+        await s3Client.send(new CopyObjectCommand({
+          Bucket: BUCKET,
+          // CopySource must include the bucket: "{bucket}/{key}".
+          CopySource: `/${BUCKET}/${encodeURIComponent(p.from).replace(/%2F/g, "/")}`,
+          Key: p.to,
+        }));
+        copied.push(p);
+      } catch (err) {
+        // Variant might legitimately not exist (photo still processing) —
+        // treat NoSuchKey/404 as a skip rather than a hard fail. Anything
+        // else aborts and rolls back what we copied so far.
+        const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+        const status = e?.$metadata?.httpStatusCode;
+        if (e?.name === "NoSuchKey" || status === 404) continue;
+        throw err;
+      }
+    }
+  } catch (err) {
+    // Roll back copies we made so we don't leave half-copied objects.
+    for (const p of copied) {
+      try {
+        await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: p.to }));
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    throw err;
+  }
+
+  // Update DB pointer first so the photos are immediately discoverable
+  // under the new album, then sweep old-album objects.
+  await sql`UPDATE photos SET album_id = ${dstAlbumId}
+            WHERE album_id = ${srcAlbumId} AND id IN ${sql(photoIds)}`;
+  // Clear stale cover on source if it pointed at any moved photo.
+  await sql`UPDATE albums SET cover_photo_id = NULL
+    WHERE id = ${srcAlbumId} AND cover_photo_id IS NOT NULL
+      AND cover_photo_id IN ${sql(photoIds)}`;
+
+  // Best-effort delete of source objects. Failures here leave benign
+  // orphans which the album-level reaper will collect.
+  for (const p of copied) {
+    try {
+      await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: p.from }));
+    } catch {
+      // Swallow — see comment above.
+    }
+  }
+}
+
+/**
+ * Return every photo id in `albumId` whose status is `ready` and whose
+ * derivatives need to be regenerated (e.g. watermark toggled). Caller is
+ * expected to enqueue derivative jobs for each.
+ */
+export async function listPhotoIdsForRegeneration(albumId: string): Promise<{ id: string; filename: string }[]> {
+  return sql<{ id: string; filename: string }[]>`
+    SELECT id, filename FROM photos
+    WHERE album_id = ${albumId} AND status IN ('ready', 'processing')`;
 }
 
 export async function markPhotoReady(photoId: string, takenAt?: Date | null): Promise<void> {

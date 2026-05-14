@@ -7,6 +7,7 @@ import {
   markPhotoReady,
   writePhotoThumbhash,
   writePhotoVariantSizes,
+  getAlbumWatermark,
 } from "@/lib/albums";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
@@ -27,8 +28,9 @@ export async function handleGenerateDerivatives(
   if (!obj.Body) throw new Error(`empty body for ${data.key}`);
   const buf = await streamToBuffer(obj.Body as NodeJS.ReadableStream);
 
+  const watermark = await getAlbumWatermark(data.album_id);
   const [variants, taken, thumbhash] = await Promise.all([
-    generateVariants(buf),
+    generateVariants(buf, watermark.enabled ? { text: watermark.text } : null),
     readTakenAt(buf),
     computeThumbhash(buf),
   ]);
