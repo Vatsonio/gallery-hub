@@ -11,6 +11,7 @@ import { PhotoTile, type PhotoTileData } from "./PhotoTile";
 import AdminLightbox from "./AdminLightbox";
 import { BulkActionsBar } from "./BulkActionsBar";
 import { CoverPickerDialog } from "./CoverPickerDialog";
+import { PhotoEditModal } from "./PhotoEditModal";
 import { reorderPhotosAction } from "@/app/admin/albums/actions";
 import type { PhotoRow } from "@/lib/types";
 
@@ -42,6 +43,7 @@ export function PhotoGrid({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [coverOpen, setCoverOpen] = useState(false);
+  const [editPhoto, setEditPhoto] = useState<PhotoTileData | null>(null);
 
   const sensors = useSensors(
     // Desktop: small drag distance triggers reorder.
@@ -193,6 +195,7 @@ export function PhotoGrid({
                     selected={selectedIds.has(t.id)}
                     onToggleSelect={toggleSelect}
                     onLongPress={(id) => enterSelection(id)}
+                    onEdit={setEditPhoto}
                     onPickCover={() => setCoverOpen(true)}
                   />
                 </div>
@@ -221,6 +224,15 @@ export function PhotoGrid({
         currentCoverId={data.album.cover_photo_id}
         onChanged={reload}
       />
+
+      {editPhoto && (
+        <PhotoEditModal
+          open={editPhoto !== null}
+          onOpenChange={(o) => { if (!o) setEditPhoto(null); }}
+          photo={editPhoto}
+          onSaved={() => { setEditPhoto(null); reload(); }}
+        />
+      )}
     </div>
   );
 }
