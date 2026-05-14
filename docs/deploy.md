@@ -241,10 +241,40 @@ In the Cloudflare dashboard for `divass.space`:
 
 ## 12. Backups
 
-Backups are not part of this wave. Once Wave 10 ships there will be a
-companion `docs/backup.md` covering Postgres `pg_dump` schedules, MinIO
-`mc mirror` to remote object storage, and offsite restore drills. Until
-then, take a manual snapshot of the named volumes before any risky change:
+Full backup + disaster-recovery runbook: **[`docs/backup.md`](backup.md)**.
+
+TL;DR:
+
+- `gallery-backup` runs `pg_dump | gzip | gpg --symmetric AES256` daily at
+  03:00 UTC into the `gallery_backups_prod` named volume. Retention:
+  7 daily / 4 weekly / 6 monthly.
+- `gallery-mirror` runs `mc mirror` daily at 04:00 UTC, append-only, from
+  MinIO to cold storage. `BACKUP_TARGET` selects `b2` (Backblaze B2),
+  `r2` (Cloudflare R2), or `local` (mounted volume).
+- `/chikaq` Storage card shows live MinIO / Postgres usage + last
+  backup/mirror timestamps.
+- A pg-boss worker (`storage-usage-check`) emits a PostHog
+  `storage_critical` event when MinIO crosses 85% of
+  `STORAGE_QUOTA_BYTES`.
+
+Fill `BACKUP_GPG_PASSPHRASE` and `BACKUP_TARGET` (+ the matching
+`B2_*` / `R2_*` env block) in `.env.prod` — see `.env.prod.example` for
+the full list. Bring the backup services up alongside the main stack:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod \
+  up -d gallery-backup gallery-mirror
+```
+
+Trigger a manual verification dump once the stack is healthy:
+
+```bash
+docker compose -f docker-compose.prod.yml exec gallery-backup \
+  /opt/scripts/pg-backup.sh
+```
+
+For raw volume tarballs before a risky change, the legacy snapshot
+command still works:
 
 ```bash
 docker run --rm -v gallery_pgdata_prod:/data -v $PWD:/backup alpine \

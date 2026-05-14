@@ -87,6 +87,17 @@ reads/writes; the browser uses the public hostname for presigned PUT/GET.
 `{ db: 'ok'|'fail', minio: 'ok'|'fail', uptime_s: N, version: '...' }`
 with status 200/503. Wire it into Cloudflare uptime monitors or Portainer.
 
+## Backups + disaster recovery
+
+Daily encrypted Postgres dumps (`pg_dump | gzip | gpg --symmetric AES256`)
+plus an append-only MinIO mirror to Backblaze B2 / Cloudflare R2 / a local
+volume. `/chikaq` surfaces live usage and last-backup timestamps; a
+pg-boss worker emits a PostHog `storage_critical` event at 85% of
+`STORAGE_QUOTA_BYTES`.
+
+Full architecture, schedules, restore drill, and partial-restore recipe
+live in [`docs/backup.md`](docs/backup.md).
+
 ## Analytics — PostHog (self-hosted) + `/chikaq` insights
 
 Two-layer analytics on top of the gallery:
