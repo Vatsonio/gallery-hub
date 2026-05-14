@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloudflare Tunnel configuration for gallery-hub.
+#
+# This file is consumed by `cloudflared tunnel run` when running in
+# credentials-file mode. Token mode (CF_TUNNEL_TOKEN env var) does not use
+# this file — see docker-compose.prod.yml comments for the toggle.
+#
+# Setup (one time):
+#   1. cloudflared tunnel login         # opens browser, saves cert.pem
+#   2. cloudflared tunnel create gallery-hub
+#      → prints the tunnel UUID and writes <UUID>.json credentials
+#   3. Copy <UUID>.json into deploy/cloudflared/credentials.json
+#   4. Copy this file to deploy/cloudflared/config.yml and replace <TUNNEL_ID>
+#   5. cloudflared tunnel route dns gallery-hub gallery.divass.space
+#      cloudflared tunnel route dns gallery-hub minio.gallery.divass.space
+#      cloudflared tunnel route dns gallery-hub posthog.gallery.divass.space
+#   6. docker compose -f docker-compose.prod.yml up -d cloudflared
+#
+# DO NOT commit credentials.json — it is git-ignored.
+# ─────────────────────────────────────────────────────────────────────────────
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/credentials.json
+
+# Send liveness metrics so the cloudflared healthcheck in docker-compose works.
+metrics: 0.0.0.0:2000
+
+# Route incoming requests by hostname. Order matters — the first match wins,
+# and the catch-all 404 at the bottom rejects anything we did not anticipate.
+ingress:
+  # Public gallery + admin UI.
+  - hostname: gallery.divass.space
+    service: http://gallery-app:3000
+    originRequest:
+      connectTimeout: 30s
+      # Allow large multipart uploads to pass through (we don't proxy uploads
+      # but admin POSTs can be sizable). CF Tunnel enforces its own 100 MB cap.
+      noTLSVerify: true
+
+  # MinIO S3 API — browser direct PUT/GET via presigned URLs.
+  - hostname: minio.gallery.divass.space
+    service: http://gallery-minio:9000
+    originRequest:
+      connectTimeout: 30s
+      # Photo uploads can be 50 MB+; give MinIO time to ack.
+      noHappyEyeballs: true
+      noTLSVerify: true
+
+  # PostHog analytics dashboard + ingestion endpoint.
+  - hostname: posthog.gallery.divass.space
+    service: http://posthog:8000
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: true
+
+  # Catch-all — anything not in this list returns 404 directly from cloudflared.
+  - service: http_status:404

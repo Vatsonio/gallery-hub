@@ -14,3 +14,10 @@ coverage
 test-results/
 playwright-report/
 tests/e2e/.fixture.json
+
+# Production secrets / Cloudflare Tunnel runtime artifacts
+.env.prod
+.env.prod.local
+deploy/cloudflared/credentials.json
+deploy/cloudflared/config.yml
+deploy/cloudflared/cert.pem
