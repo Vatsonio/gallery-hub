@@ -239,6 +239,21 @@ In the Cloudflare dashboard for `divass.space`:
   `*minio.gallery.divass.space/*` with `Cache Level: Bypass` —
   presigned URLs must never be cached at the edge
 
+### Telegram notifications (optional but recommended)
+
+Real-time push when a client engages with a gallery. Full setup guide:
+**[`docs/notifications.md`](notifications.md)**.
+
+TL;DR:
+
+1. Create a bot via `@BotFather` → copy the token.
+2. Get your chat id via `@userinfobot` (or a group + `/getUpdates`).
+3. Set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+   `TELEGRAM_RATE_LIMIT_PER_MINUTE` in `.env.prod`.
+4. `docker compose -f docker-compose.prod.yml restart gallery-app gallery-worker`
+5. Sign in to `/admin/notifications`, click **Test send**, confirm the
+   row reaches `status='sent'`.
+
 ## 12. Backups
 
 Full backup + disaster-recovery runbook: **[`docs/backup.md`](backup.md)**.
