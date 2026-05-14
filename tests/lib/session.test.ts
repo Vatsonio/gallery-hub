@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionOptions } from "@/lib/session";
 
 describe("sessionOptions", () => {
@@ -22,5 +22,40 @@ describe("sessionOptions", () => {
     expect(sessionOptions.cookieOptions?.httpOnly).toBe(true);
     expect(sessionOptions.cookieOptions?.sameSite).toBe("lax");
     expect(sessionOptions.cookieOptions?.path).toBe("/");
+  });
+});
+
+describe("SESSION_PASSWORD production guard", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("throws when production + SESSION_PASSWORD missing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_PASSWORD", "");
+    await expect(import("@/lib/session")).rejects.toThrow(
+      /SESSION_PASSWORD env var is required in production/
+    );
+  });
+
+  it("returns the dev fallback when not production + SESSION_PASSWORD missing", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SESSION_PASSWORD", "");
+    const { sessionOptions: fresh } = await import("@/lib/session");
+    expect(fresh.password).toBe(
+      "dev-only-insecure-password-please-override-in-production-env"
+    );
+  });
+
+  it("accepts SESSION_PASSWORD in production when set", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_PASSWORD", "p".repeat(40));
+    const { sessionOptions: fresh } = await import("@/lib/session");
+    expect(fresh.password).toBe("p".repeat(40));
   });
 });

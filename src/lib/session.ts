@@ -6,10 +6,20 @@ export interface AdminSession {
   email?: string;
 }
 
+function resolveSessionPassword(): string {
+  const fromEnv = process.env.SESSION_PASSWORD;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_PASSWORD env var is required in production. " +
+        "Generate one with: openssl rand -hex 32"
+    );
+  }
+  return "dev-only-insecure-password-please-override-in-production-env";
+}
+
 export const sessionOptions: SessionOptions = {
-  password:
-    process.env.SESSION_PASSWORD ??
-    "dev-only-insecure-password-please-override-in-production-env",
+  password: resolveSessionPassword(),
   cookieName: "gh_admin_session",
   cookieOptions: {
     httpOnly: true,

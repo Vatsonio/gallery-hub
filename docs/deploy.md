@@ -79,6 +79,13 @@ Then **open `.env.prod` in an editor** and:
 - Leave `POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_KEY` blank for now — filled in
   step 10 after PostHog first-boot
 
+> **Startup guard:** `src/lib/session.ts` throws at module load if
+> `NODE_ENV=production` and `SESSION_PASSWORD` is missing or empty. The Next
+> server will not boot without it — the failure surfaces immediately on the
+> first request rather than silently falling back to a publicly-known dev key.
+> If you see `Error: SESSION_PASSWORD env var is required in production`,
+> regenerate with `openssl rand -hex 32` and confirm it landed in `.env.prod`.
+
 ## 4. Cloudflare Tunnel setup
 
 You need a Cloudflare account with `divass.space` already onboarded as a zone.
