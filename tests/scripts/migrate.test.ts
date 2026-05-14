@@ -26,7 +26,8 @@ describe.skipIf(dockerOff)("runMigrations", () => {
         "009_view_events_details.sql",
         "010_photo_variant_avif.sql",
         "011_photo_thumbhash.sql",
-        "012_album_watermark.sql"
+        "012_album_watermark.sql",
+        "013_notifications.sql"
       ]);
 
       const tables = await sql<{ table_name: string }[]>`
@@ -41,6 +42,8 @@ describe.skipIf(dockerOff)("runMigrations", () => {
       expect(names).toContain("share_links");
       expect(names).toContain("favorites");
       expect(names).toContain("view_events");
+      expect(names).toContain("notification_log");
+      expect(names).toContain("notification_rules");
     } finally {
       await sql.end();
     }

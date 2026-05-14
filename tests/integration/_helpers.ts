@@ -15,6 +15,10 @@ export async function teardownTestDb(): Promise<void> {
 export async function resetTestDb(): Promise<void> {
   // Clear gallery tables (don't touch pgboss_gallery; the worker has its own lifecycle).
   await sql`TRUNCATE TABLE view_events, favorites, share_links, photos, albums RESTART IDENTITY CASCADE`;
+  // notification_log is wiped too so dedup-key tests start clean.
+  // notification_rules are NOT truncated — the migration seeds defaults, and
+  // tests that mutate them should put them back in their afterEach.
+  await sql`TRUNCATE TABLE notification_log RESTART IDENTITY`;
 }
 
 export async function seedAlbumWithPhotos(opts: {
