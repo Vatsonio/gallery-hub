@@ -10,6 +10,7 @@ import ExportModal, {
   type ExportOptionId,
 } from "@/components/gallery/ExportModal";
 import PageLoadProgress from "@/components/gallery/PageLoadProgress";
+import { ToastProvider } from "@/components/ui/Toast";
 import type { ExportSizes } from "@/lib/exportSizes";
 
 /**
@@ -127,49 +128,56 @@ export default function GalleryShell({
   const showSaveAllFooter = exportSizes.totalCount > 0;
 
   return (
-    <PageLoadProgress
-      cap={PROGRESS_CAP}
-      enabled={exportSizes.totalCount > 0}
-    >
-      {isAdminPreview && (
-        <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
-          Admin preview — favorites and views are not recorded. Open the link in
-          a private window to test as a real visitor.
-        </div>
-      )}
-      {children}
-      {showSaveAllFooter && (
-        <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">
-          <button
-            type="button"
-            onClick={() => {
-              setPreselect("all-original");
-              setExportOpen(true);
-            }}
-            className="group inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/90 backdrop-blur hover:border-white/20 hover:bg-white/[0.08] transition cursor-pointer"
-          >
-            <FileImage className="h-4 w-4 text-white/70 group-hover:text-white transition" />
-            <span>Save all</span>
-            <span className="text-white/50">
-              {exportSizes.totalCount} photo{exportSizes.totalCount === 1 ? "" : "s"}
+    // ToastProvider wraps everything so ExportModal (and any future
+    // child) can surface validation/error feedback. Mounting it here
+    // — rather than at the share layout — keeps the toast surface
+    // out of the public landing's password / locked screens, where
+    // we never need it.
+    <ToastProvider>
+      <PageLoadProgress
+        cap={PROGRESS_CAP}
+        enabled={exportSizes.totalCount > 0}
+      >
+        {isAdminPreview && (
+          <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
+            Admin preview — favorites and views are not recorded. Open the link in
+            a private window to test as a real visitor.
+          </div>
+        )}
+        {children}
+        {showSaveAllFooter && (
+          <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">
+            <button
+              type="button"
+              onClick={() => {
+                setPreselect("all-original");
+                setExportOpen(true);
+              }}
+              className="group inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/90 backdrop-blur hover:border-white/20 hover:bg-white/[0.08] transition cursor-pointer"
+            >
+              <FileImage className="h-4 w-4 text-white/70 group-hover:text-white transition" />
+              <span>Save all</span>
+              <span className="text-white/50">
+                {exportSizes.totalCount} photo{exportSizes.totalCount === 1 ? "" : "s"}
+              </span>
+            </button>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-white/25">
+              gallery.divass.space
             </span>
-          </button>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-white/25">
-            gallery.divass.space
-          </span>
-        </footer>
-      )}
-      <MobileTabBar
-        token={token}
-        favoritesCount={favoritesCount}
-      />
-      <ExportModal
-        open={exportOpen}
-        onClose={() => setExportOpen(false)}
-        token={token}
-        options={options}
-        preselect={preselect}
-      />
-    </PageLoadProgress>
+          </footer>
+        )}
+        <MobileTabBar
+          token={token}
+          favoritesCount={favoritesCount}
+        />
+        <ExportModal
+          open={exportOpen}
+          onClose={() => setExportOpen(false)}
+          token={token}
+          options={options}
+          preselect={preselect}
+        />
+      </PageLoadProgress>
+    </ToastProvider>
   );
 }
