@@ -1,8 +1,9 @@
 import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { sql } from "@/lib/db";
 import { randomUUID } from "node:crypto";
-import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey, avifVariantKey, originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import { s3Client, BUCKET } from "@/lib/minio";
 import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoRow } from "@/lib/types";
 
@@ -427,10 +428,26 @@ export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
       ON p.album_id = a.id
     WHERE a.deleted_at IS NULL
     ORDER BY a.updated_at DESC`;
-  return Promise.all(rows.map(async (r) => ({
-    ...r,
-    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "web"), 3600, {
-      responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-    }) : null,
-  })));
+  // Cover thumbs now resolve through imgproxy. We need the cover photo's
+  // filename (for ext recovery) + updated_at (for cache-bust) — pulled in
+  // one batch lookup so the album list stays O(1) DB round-trips.
+  const coverIds = rows.map((r) => r.cover_photo_id).filter((id): id is string => id !== null);
+  type CoverRow = { id: string; filename: string; updated_at: string };
+  const covers = coverIds.length
+    ? await sql<CoverRow[]>`SELECT id, filename, updated_at FROM photos WHERE id IN ${sql(coverIds)}`
+    : [];
+  const coverMap = new Map(covers.map((c) => [c.id, c]));
+  return rows.map((r) => {
+    let cover_thumb_url: string | null = null;
+    if (r.cover_photo_id) {
+      const cover = coverMap.get(r.cover_photo_id);
+      if (cover) {
+        cover_thumb_url = imgproxyWeb(
+          originalKey(r.id, cover.id, resolveOriginalExt(cover.filename)),
+          { version: photoVersionSeed(cover.updated_at) },
+        );
+      }
+    }
+    return { ...r, cover_thumb_url };
+  });
 }

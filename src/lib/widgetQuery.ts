@@ -1,6 +1,7 @@
 import { sql } from "@/lib/db";
-import { getPresignedUrl } from "@/lib/minio";
-import { variantKey } from "@/lib/keys";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import {
   groupFavoriteEvents,
   type GroupedSelection,
@@ -103,27 +104,41 @@ export async function loadWidgetSummary(baseUrl: string): Promise<WidgetSummary>
     LIMIT 5
   `;
 
-  const recent_albums: WidgetRecentAlbum[] = await Promise.all(
-    albums.map(async (a) => {
-      let cover_url: string | null = null;
-      if (a.cover_photo_id) {
-        // 1h presigned URL — within the revalidate window of any sane
-        // consumer, so we don't pay the round-trip cost on every render.
-        cover_url = await getPresignedUrl(variantKey(a.id, a.cover_photo_id, "web"), 3600);
+  // Resolve cover photos' filenames + updated_at in one batch so we can
+  // build the imgproxy URLs without N+1 round-trips.
+  const coverIds = albums.map((a) => a.cover_photo_id).filter((id): id is string => id !== null);
+  type CoverRow = { id: string; filename: string; updated_at: Date };
+  const coverPhotos = coverIds.length
+    ? await sql<CoverRow[]>`SELECT id, filename, updated_at FROM photos WHERE id IN ${sql(coverIds)}`
+    : [];
+  const coverMap = new Map(coverPhotos.map((c) => [c.id, c]));
+
+  const recent_albums: WidgetRecentAlbum[] = albums.map((a) => {
+    let cover_url: string | null = null;
+    if (a.cover_photo_id) {
+      const cover = coverMap.get(a.cover_photo_id);
+      if (cover) {
+        // imgproxy URLs are content-addressed by signature, so cache-friendly
+        // even without explicit revalidation windows. version=updated_at
+        // invalidates on photo-edit; otherwise the URL is stable forever.
+        cover_url = imgproxyWeb(
+          originalKey(a.id, cover.id, resolveOriginalExt(cover.filename)),
+          { version: photoVersionSeed(cover.updated_at) },
+        );
       }
-      return {
-        title: a.title,
-        subtitle: a.subtitle,
-        cover_url,
-        photo_count: n(a.photo_count),
-        favorite_count: n(a.favorite_count),
-        view_count: n(a.view_count),
-        share_url: a.token ? `${baseUrl}/a/${a.token}` : null,
-        status: a.status,
-        updated_at: a.updated_at.toISOString(),
-      };
-    }),
-  );
+    }
+    return {
+      title: a.title,
+      subtitle: a.subtitle,
+      cover_url,
+      photo_count: n(a.photo_count),
+      favorite_count: n(a.favorite_count),
+      view_count: n(a.view_count),
+      share_url: a.token ? `${baseUrl}/a/${a.token}` : null,
+      status: a.status,
+      updated_at: a.updated_at.toISOString(),
+    };
+  });
 
   const rawEvents = await sql<RawFavoriteEvent[]>`
     SELECT v.share_token, v.viewer_id, v.created_at, a.title AS album_title
