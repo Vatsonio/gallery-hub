@@ -9,7 +9,18 @@ import ExportModal, {
   type ExportOption,
   type ExportOptionId,
 } from "@/components/gallery/ExportModal";
+import PageLoadProgress from "@/components/gallery/PageLoadProgress";
 import type { ExportSizes } from "@/lib/exportSizes";
+
+/**
+ * How many photo tiles can register with the page-load progress bar.
+ * Includes the cover hero (it registers via the same context). The cap
+ * keeps the bar tracking only critical-render content — tiles below the
+ * fold with loading="lazy" may never enter the viewport, so including
+ * them would freeze progress at <100%. The cap matches roughly a typical
+ * desktop first screen (4 rows × 4 cols + cover).
+ */
+const PROGRESS_CAP = 32;
 
 interface Props {
   token: string;
@@ -116,7 +127,10 @@ export default function GalleryShell({
   const showSaveAllFooter = exportSizes.totalCount > 0;
 
   return (
-    <>
+    <PageLoadProgress
+      cap={PROGRESS_CAP}
+      enabled={exportSizes.totalCount > 0}
+    >
       {isAdminPreview && (
         <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
           Admin preview — favorites and views are not recorded. Open the link in
@@ -156,6 +170,6 @@ export default function GalleryShell({
         options={options}
         preselect={preselect}
       />
-    </>
+    </PageLoadProgress>
   );
 }

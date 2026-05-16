@@ -27,6 +27,7 @@ import { safeCapture } from "@/lib/analytics";
 import { createRateLimiter } from "@/lib/rateLimiter";
 import { resolveIpFromHeaders } from "@/lib/client-ip";
 import PhotoTile from "@/components/gallery/PhotoTile";
+import CoverImage from "@/components/gallery/CoverImage";
 import GalleryShell from "./_gallery-shell";
 
 // F6 — per-IP-per-token defense-in-depth on the share landing. Tokens are
@@ -242,16 +243,11 @@ export default async function PublicGalleryPage({ params }: Props) {
                 href={coverAvifUrl ?? coverUrl}
                 fetchPriority="high"
               />
-              <picture>
-                {coverAvifUrl ? <source srcSet={coverAvifUrl} type="image/avif" /> : null}
-                <img
-                  src={coverUrl}
-                  alt=""
-                  fetchPriority="high"
-                  decoding="sync"
-                  className="w-full object-cover max-h-[60vh] sm:max-h-[85vh] cover-kenburns"
-                />
-              </picture>
+              <CoverImage
+                src={coverUrl}
+                avifSrc={coverAvifUrl}
+                className="w-full object-cover max-h-[60vh] sm:max-h-[85vh] cover-kenburns"
+              />
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               <div className="absolute inset-x-0 bottom-0 px-6 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:pb-16 text-center">
                 <h1 className="text-3xl sm:text-5xl font-light tracking-tight text-white drop-shadow">

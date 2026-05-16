@@ -6,6 +6,7 @@ import HeartBurst from "./HeartBurst";
 import HeartOverlay from "./HeartOverlay";
 import { toggleFavorite } from "@/app/a/[token]/_actions";
 import { startViewTransition, setViewTransitionName } from "@/lib/view-transition";
+import { usePhotoLoadProgress } from "./PageLoadProgress";
 
 interface Props {
   token: string;
@@ -75,12 +76,38 @@ export default function PhotoTile({
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
   const imgRef = useRef<HTMLImageElement>(null);
+  // Only above-the-fold tiles register with the page-load progress bar.
+  // Lazy tiles further down may never enter the viewport, which would
+  // freeze the bar below 100% indefinitely.
+  const progress = usePhotoLoadProgress();
+  const reportedRef = useRef(false);
 
   useEffect(() => {
     return () => {
       if (pendingNavTimer.current) clearTimeout(pendingNavTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!priority) return;
+    progress.register();
+    // `register` and `reportLoaded` come from a stable useMemo in the
+    // provider — re-running this effect on identity churn would
+    // double-count, so we intentionally pass an empty dep array. The
+    // provider api is referentially stable for the page lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Single shared callback for onLoad/onError so a broken URL still
+  // increments the resolved counter — otherwise one 404 would freeze
+  // the bar.
+  function onImgResolved(): void {
+    setLoaded(true);
+    if (!priority) return;
+    if (reportedRef.current) return;
+    reportedRef.current = true;
+    progress.reportLoaded();
+  }
 
   function cancelPendingNav(): void {
     if (pendingNavTimer.current) {
@@ -224,8 +251,9 @@ export default function PhotoTile({
           decoding={priority ? "sync" : "async"}
           fetchPriority={priority ? "high" : "auto"}
           draggable={false}
-          onLoad={() => setLoaded(true)}
-          className={`relative h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
+          onLoad={onImgResolved}
+          onError={onImgResolved}
+          className={`relative h-full w-full object-cover transition-[opacity,transform] duration-300 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
         />
       </picture>
       <HeartBurst trigger={burst} />
