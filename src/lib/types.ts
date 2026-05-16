@@ -46,6 +46,13 @@ export interface PhotoRow {
   taken_at: string | null;
   status: PhotoStatus;
   created_at: string;
+  /**
+   * Last byte-content mutation. Bumped on photo create (worker derivatives
+   * pass) and on photo-edit (rotate/crop/brightness). Used as the `version`
+   * input to buildImgproxyUrl so the imgproxy cache invalidates without a
+   * manual PURGE when an admin edits a photo. See migrations/015.
+   */
+  updated_at: string;
   /** Base64-encoded ThumbHash placeholder, null until the worker fills it in. */
   thumbhash?: string | null;
   /** Byte size of the AVIF mirror of the web variant; null when absent. */

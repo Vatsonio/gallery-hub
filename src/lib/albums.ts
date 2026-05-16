@@ -352,10 +352,41 @@ export async function listPhotoIdsForRegeneration(albumId: string): Promise<{ id
 
 export async function markPhotoReady(photoId: string, takenAt?: Date | null): Promise<void> {
   if (takenAt) {
-    await sql`UPDATE photos SET status = 'ready', taken_at = ${takenAt} WHERE id = ${photoId}`;
+    await sql`UPDATE photos SET status = 'ready', taken_at = ${takenAt}, updated_at = now() WHERE id = ${photoId}`;
   } else {
-    await sql`UPDATE photos SET status = 'ready' WHERE id = ${photoId}`;
+    await sql`UPDATE photos SET status = 'ready', updated_at = now() WHERE id = ${photoId}`;
   }
+}
+
+/**
+ * One-shot photo "ready" transition for the imgproxy era. Writes
+ * width/height (authoritative server-side metadata), taken_at (EXIF),
+ * thumbhash, and flips status='ready' + bumps updated_at — all in one
+ * round-trip so the worker hot path stays ~one DB write per photo.
+ *
+ * Variants are NOT generated server-side anymore: imgproxy resizes on
+ * demand from the original. The worker only fills in the bits imgproxy
+ * doesn't know (EXIF, thumbhash, sharp-verified dimensions).
+ */
+export async function finalizePhotoMetadata(
+  photoId: string,
+  meta: {
+    width: number;
+    height: number;
+    takenAt: Date | null;
+    thumbhash: string;
+  },
+): Promise<void> {
+  await sql`
+    UPDATE photos
+       SET width      = ${meta.width},
+           height     = ${meta.height},
+           taken_at   = ${meta.takenAt},
+           thumbhash  = ${meta.thumbhash},
+           status     = 'ready',
+           updated_at = now()
+     WHERE id = ${photoId}
+  `;
 }
 
 export interface VariantSizes {

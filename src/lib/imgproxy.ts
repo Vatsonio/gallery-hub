@@ -224,6 +224,20 @@ export function isImgproxyEnabled(): boolean {
   return getSigningContext() !== null;
 }
 
+/**
+ * Turn a photo row's `updated_at` (or any ISO/Date/number) into a stable
+ * integer the URL builder can stamp into ?v= for cache-busting. We deliberately
+ * use seconds (not ms) so a re-render of the same photo collapses onto the
+ * same URL even when the SQL layer hands us a slightly different precision.
+ */
+export function photoVersionSeed(updated: string | number | Date | null | undefined): number {
+  if (updated == null) return 0;
+  if (typeof updated === "number") return Math.floor(updated / 1000);
+  const t = updated instanceof Date ? updated.getTime() : Date.parse(updated);
+  if (!Number.isFinite(t)) return 0;
+  return Math.floor(t / 1000);
+}
+
 // ---------------------------------------------------------------------------
 // Common-size helpers. The size buckets mirror the historical WEBP variants
 // the gallery generated (thumb/web/large) so a port from variantKey() → these
