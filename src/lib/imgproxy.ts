@@ -297,3 +297,85 @@ export function imgproxyLarge(s3Key: string, opts: Partial<ImgproxyOptions> = {}
     ...opts,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Cache pre-warming. The first viewer of a freshly-uploaded photo pays a
+// 200–500 ms imgproxy cold-render cost per tile (libvips resize + AVIF
+// encode). We hide that cost by firing fire-and-forget GETs for the two
+// most-trafficked variants (thumb 400 + web 1600) immediately after the
+// finalize handler inserts photos.
+//
+// "Fire and forget" really means it here:
+//   - we don't await the promise array
+//   - we swallow errors (warming is opportunistic; a failed warm-fetch
+//     just means the first real viewer pays the cold cost)
+//   - we cap parallelism so the warm storm can't pin all imgproxy threads
+//     against itself and starve a concurrent legitimate viewer
+// ---------------------------------------------------------------------------
+
+/**
+ * Fan out GETs to the imgproxy thumb + web variants for each (s3Key,
+ * version) pair. Each fetch is sent with `Accept: image/avif,image/webp,image/*`
+ * so imgproxy bakes the AVIF variant into its on-disk cache — that's the one
+ * the browser is likely to ask for. We deliberately do NOT await the returned
+ * promise; the caller can `void warmImgproxyVariants(...)` and move on. Errors
+ * are caught and logged at warn level — a failed warm has no user-visible
+ * impact, so we'd rather see a noisy log than crash the route handler.
+ *
+ * `concurrency` defaults to 6 — high enough to overlap network/CPU but well
+ * below the IMGPROXY_CONCURRENCY ceiling (10 after W2) so a real user
+ * request can still squeeze in.
+ */
+export async function warmImgproxyVariants(
+  items: Array<{ s3Key: string; version?: number | string | null }>,
+  options: { concurrency?: number; signal?: AbortSignal } = {},
+): Promise<void> {
+  if (!isImgproxyEnabled()) return;
+  if (items.length === 0) return;
+  const concurrency = Math.max(1, Math.min(20, options.concurrency ?? 6));
+
+  // Build the URL list. Each photo contributes 2 URLs (thumb 400 + web 1600);
+  // we skip large 2400 because only the cover photo hits that variant.
+  const urls: string[] = [];
+  for (const it of items) {
+    const versionOpt = it.version != null ? { version: it.version } : {};
+    urls.push(imgproxyThumb(it.s3Key, versionOpt));
+    urls.push(imgproxyWeb(it.s3Key, versionOpt));
+  }
+
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < urls.length) {
+      const idx = cursor++;
+      const url = urls[idx];
+      try {
+        // We request the AVIF/WEBP-preferred Accept so imgproxy caches the
+        // exact bytes the browser will ask for. `keepalive` lets us drop the
+        // process on the caller side without aborting in-flight fetches.
+        const res = await fetch(url, {
+          method: "GET",
+          headers: {
+            accept: "image/avif,image/webp,image/*;q=0.8",
+            "user-agent": "gallery-hub-warmer/1",
+          },
+          signal: options.signal,
+        });
+        // Drain the body so connection/keepalive accounting completes — imgproxy
+        // returns 200 with the full encoded image; not reading the body would
+        // leave the socket half-open.
+        await res.arrayBuffer().catch(() => undefined);
+      } catch (err) {
+        // Warming is best-effort; an aborted/timed-out fetch is a no-op for
+        // the user. Only emit at debug-ish level to avoid log spam at scale.
+        if ((err as { name?: string }).name !== "AbortError") {
+          // eslint-disable-next-line no-console
+          console.warn("[imgproxy-warm] fetch failed:", url, (err as Error).message);
+        }
+      }
+    }
+  }
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrency, urls.length); i++) workers.push(worker());
+  await Promise.all(workers);
+}

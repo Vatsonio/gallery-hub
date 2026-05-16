@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import {
   buildImgproxyUrl,
@@ -7,6 +7,7 @@ import {
   imgproxyLarge,
   isImgproxyEnabled,
   photoVersionSeed,
+  warmImgproxyVariants,
   __resetImgproxyContextForTests,
 } from "@/lib/imgproxy";
 
@@ -178,6 +179,85 @@ describe("imgproxy URL builder", () => {
     const undershoot = buildImgproxyUrl("albums/a/p/original.jpg", { quality: -50 });
     expect(overshoot).toContain("/quality:100/");
     expect(undershoot).toContain("/quality:1/");
+  });
+});
+
+describe("warmImgproxyVariants", () => {
+  beforeEach(setupEnv);
+  afterEach(() => {
+    tearDownEnv();
+    vi.restoreAllMocks();
+  });
+
+  function mockFetchOk(): { calls: string[]; spy: ReturnType<typeof vi.fn> } {
+    const calls: string[] = [];
+    const fakeBody = new ArrayBuffer(8);
+    const spy = vi.fn(async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => fakeBody,
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", spy);
+    return { calls, spy };
+  }
+
+  it("fires GETs for thumb + web for every photo (2 hits/photo)", async () => {
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([
+      { s3Key: "albums/a/p1/original.jpg" },
+      { s3Key: "albums/a/p2/original.jpg" },
+      { s3Key: "albums/a/p3/original.jpg" },
+    ]);
+    expect(calls).toHaveLength(6);
+    // Each URL contains either resize:fit:400:400 (thumb) or resize:fit:1600:1600 (web).
+    const thumb = calls.filter((u) => u.includes("/resize:fit:400:400:0/"));
+    const web = calls.filter((u) => u.includes("/resize:fit:1600:1600:0/"));
+    expect(thumb).toHaveLength(3);
+    expect(web).toHaveLength(3);
+  });
+
+  it("requests AVIF/WEBP via Accept so imgproxy caches the right encoding", async () => {
+    const { spy } = mockFetchOk();
+    await warmImgproxyVariants([{ s3Key: "albums/a/p1/original.jpg" }]);
+    const lastInit = spy.mock.calls[0][1] as RequestInit;
+    const acceptHeader = (lastInit.headers as Record<string, string>)["accept"];
+    expect(acceptHeader).toContain("image/avif");
+    expect(acceptHeader).toContain("image/webp");
+  });
+
+  it("is a no-op when imgproxy env isn't wired", async () => {
+    tearDownEnv();
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([{ s3Key: "albums/a/p1/original.jpg" }]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("is a no-op for empty input", async () => {
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("swallows fetch errors and still resolves (best-effort warming)", async () => {
+    const errSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("boom"); }));
+    await expect(
+      warmImgproxyVariants([
+        { s3Key: "albums/a/p1/original.jpg" },
+        { s3Key: "albums/a/p2/original.jpg" },
+      ]),
+    ).resolves.toBeUndefined();
+    // Each photo emits 2 URLs and both fail — expect 4 warn lines.
+    expect(errSpy).toHaveBeenCalled();
+  });
+
+  it("threads the version param into cachebuster:N on every URL", async () => {
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([{ s3Key: "albums/a/p1/original.jpg", version: 1234567890 }]);
+    expect(calls.every((u) => u.includes("/cachebuster:1234567890/"))).toBe(true);
   });
 });
 
