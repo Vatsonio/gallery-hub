@@ -22,8 +22,17 @@ import { listFavoritePhotoIds } from "@/lib/favorites";
 import { requireAdminSessionFromCookies } from "@/lib/session";
 import { computeExportSizes } from "@/lib/exportSizes";
 import { safeCapture } from "@/lib/analytics";
+import { createRateLimiter } from "@/lib/rateLimiter";
+import { resolveIpFromHeaders } from "@/lib/client-ip";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "./_gallery-shell";
+
+// F6 — per-IP-per-token defense-in-depth on the share landing. Tokens are
+// 12 chars of base64url (~72 bits) so guessing is mathematically out of
+// reach, but a leaked token must not be scrapable without throttle, and a
+// future change to token length / alphabet would silently lose the only
+// line of defense if no limiter ever existed here.
+const shareViewLimiter = createRateLimiter({ max: 60, windowMs: 60_000 });
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +42,20 @@ interface Props {
 
 export default async function PublicGalleryPage({ params }: Props) {
   const { token } = await params;
+
+  // F6 — rate-limit anonymous share views (per token x IP / 60 / 60s).
+  const ip = resolveIpFromHeaders(await headers());
+  if (!shareViewLimiter.allow(`share:${token}:${ip}`)) {
+    return (
+      <main className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl font-light tracking-wide">429</div>
+          <div className="mt-2 text-white/60">Too many requests. Please slow down.</div>
+        </div>
+      </main>
+    );
+  }
+
   const jar = await cookies();
   const unlocked = jar.get(unlockCookieName(token))?.value ?? null;
   const status = await resolveShareLinkStatus(token, unlocked);
