@@ -168,6 +168,17 @@ echo   (Workers from dev.bat keep running in their own windows.)
 echo ============================================================
 echo.
 
-call npm run start
+REM --- Run the standalone server (next.config has output:"standalone",
+REM which means `next start` errors out; the standalone bundle exposes
+REM its own minimal server at .next/standalone/server.js). Copy the
+REM static assets + public/ in beside it so the server can serve them.
+echo [serve] copying static + public assets next to standalone bundle ...
+if exist ".next\standalone\.next\static" rmdir /s /q ".next\standalone\.next\static" 2>nul
+xcopy /e /i /q /y ".next\static" ".next\standalone\.next\static" >nul
+if exist "public" xcopy /e /i /q /y "public" ".next\standalone\public" >nul
+echo [serve] starting node .next\standalone\server.js on port %DEV_PORT% ...
+set PORT=%DEV_PORT%
+set HOSTNAME=0.0.0.0
+node .next\standalone\server.js
 
 endlocal

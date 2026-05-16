@@ -125,7 +125,7 @@ export function CoverPickerDialog({ open, onOpenChange, slug, albumId, currentCo
                     aria-label="Pick this photo as cover"
                   >
                     {url ? (
-                      <Image src={url} alt="" fill sizes="160px" className="object-cover" />
+                      <Image src={url} alt="" fill sizes="160px" unoptimized className="object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500">
                         {p.status}

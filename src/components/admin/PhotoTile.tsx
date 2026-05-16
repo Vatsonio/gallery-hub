@@ -95,7 +95,7 @@ export function PhotoTile({
       onPointerCancel={() => longPress?.onPointerCancel()}
     >
       {displayUrl ? (
-        <Image src={displayUrl} alt="" fill sizes="(max-width:640px) 50vw, (max-width:768px) 33vw, (max-width:1024px) 25vw, 16vw" className="object-cover" />
+        <Image src={displayUrl} alt="" fill sizes="(max-width:640px) 50vw, (max-width:768px) 33vw, (max-width:1024px) 25vw, 16vw" unoptimized className="object-cover" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500">
           {photo.status}
