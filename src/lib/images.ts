@@ -1,3 +1,14 @@
+// LEGACY: this module used to be the heart of the pre-imgproxy derivative
+// pipeline — `generateVariants` baked WEBP thumb/web/large + AVIF web/large
+// on every upload. Since the imgproxy migration the worker is metadata-only
+// and these helpers are unreferenced on the hot path. We keep them here for:
+//   * One-shot regeneration scripts (scripts/backfill-*.ts).
+//   * Watermark PNG composition (applyWatermark → upload to
+//     watermarks/{albumId}.png so imgproxy can composite it on demand).
+//   * Possible rollback if imgproxy goes down and we need to fall back to
+//     pre-baked variants.
+// readTakenAt is still on the hot path (workers/generateDerivatives.ts) and
+// genuinely belongs here — it's an EXIF parser, not a sharp pipeline.
 import sharp from "sharp";
 import exifr from "exifr";
 
