@@ -52,6 +52,10 @@ const cspHeader = [
 
 const nextConfig = {
   output: "standalone",
+  // F8 pentest finding (2026-05-16): Next ships `X-Powered-By: Next.js` on
+  // every HTML response by default, which fingerprints the framework +
+  // (combined with asset paths) the major version. Suppress.
+  poweredByHeader: false,
   experimental: { serverActions: { bodySizeLimit: "50mb" } },
   serverExternalPackages: ["sharp", "pg-boss"],
   images: {
