@@ -33,6 +33,20 @@ describe.skipIf(dockerOff)("authenticate", () => {
     const result = await authenticate("ghost@test.local", "anything");
     expect(result.ok).toBe(false);
   });
+
+  // F4 regression — the user-not-found branch must take roughly as long as a
+  // wrong-password branch so an attacker can't enumerate admin emails by
+  // timing. We don't assert exact equality (argon2 has small jitter); we
+  // assert the no-user path took at least 50ms (i.e. a full verify ran).
+  it("burns an argon2 cycle on the unknown-email branch (F4 timing)", async () => {
+    // Warm the dummy-hash promise once so the first call doesn't pay the
+    // hashPassword cost on top of verifyPassword.
+    await authenticate("warm@test.local", "x");
+    const start = Date.now();
+    await authenticate("ghost-timing@test.local", "anything");
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+  });
 });
 
 // Rate-limiter tests run module-level and don't need Docker. They use

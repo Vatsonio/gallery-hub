@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { sql } from "@/lib/db";
-import { verifyPassword } from "@/lib/passwords";
+import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { getAdminSession } from "@/lib/session";
 import { createRateLimiter } from "@/lib/rateLimiter";
 import { safeCapture } from "@/lib/analytics";
@@ -42,11 +42,29 @@ async function resolveRequestIp(): Promise<string> {
   return resolveIpFromHeaders(h);
 }
 
+// Lazy dummy argon2 hash. Used to constant-time the user-not-found branch of
+// authenticate() so an attacker can't enumerate valid admin emails via the
+// response-time delta (F4 in the 2026-05-16 pentest measured ~37 ms).
+// Computed once on first use to avoid baking a literal hash into source.
+let dummyHashPromise: Promise<string> | null = null;
+function getDummyHash(): Promise<string> {
+  if (!dummyHashPromise) {
+    dummyHashPromise = hashPassword("::not-a-real-password::");
+  }
+  return dummyHashPromise;
+}
+
 export async function authenticate(email: string, password: string): Promise<AuthResult> {
   const rows = await sql<AdminRow[]>`
     SELECT id, email, password_hash FROM admin_users WHERE email = ${email} LIMIT 1
   `;
-  if (rows.length === 0) return { ok: false, error: GENERIC_ERROR };
+  if (rows.length === 0) {
+    // Burn an argon2 verify against a fixed dummy hash so the no-user branch
+    // takes the same wall-clock time as the wrong-password branch.
+    const dummy = await getDummyHash();
+    await verifyPassword(dummy, password);
+    return { ok: false, error: GENERIC_ERROR };
+  }
   const row = rows[0];
   const valid = await verifyPassword(row.password_hash, password);
   if (!valid) return { ok: false, error: GENERIC_ERROR };
