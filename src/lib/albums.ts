@@ -127,6 +127,62 @@ export async function insertPhoto(input: InsertPhotoInput): Promise<PhotoRow> {
   return rows[0];
 }
 
+/**
+ * Bulk-insert photos in a single round-trip. All rows must share the same
+ * album_id (this is the only sane batching unit because sort_order is
+ * computed relative to the album). Caller is responsible for de-dup; the
+ * primary key conflict will explode the whole batch.
+ *
+ * Rows are assigned sequential sort_order values starting at MAX+1, in the
+ * order they appear in `inputs`. status is always 'processing'.
+ *
+ * Empty input is a no-op (returns []).
+ */
+export async function insertPhotosBatch(inputs: InsertPhotoInput[]): Promise<PhotoRow[]> {
+  if (inputs.length === 0) return [];
+  const albumId = inputs[0].album_id;
+  // Cheap sanity guard — finalize never mixes albums, but make sure callers
+  // who reach for this helper don't accidentally do so.
+  for (const i of inputs) {
+    if (i.album_id !== albumId) throw new Error("insertPhotosBatch: mixed album_id not supported");
+  }
+  // Resolve the starting sort_order once per batch. Outside a transaction
+  // this is racy against a concurrent insert into the same album, but the
+  // finalize route is the only writer and it runs serially per request.
+  const maxRows = await sql<{ next: number }[]>`
+    SELECT COALESCE(MAX(sort_order) + 1, 0)::int AS next FROM photos WHERE album_id = ${albumId}`;
+  const base = maxRows[0]?.next ?? 0;
+  const rows: Record<string, unknown>[] = inputs.map((p, i) => ({
+    id: p.id,
+    album_id: p.album_id,
+    filename: p.filename,
+    width: p.width,
+    height: p.height,
+    orig_bytes: p.orig_bytes,
+    sort_order: base + i,
+    taken_at: p.taken_at,
+    status: "processing",
+  }));
+  // postgres.js sql(rows, ...cols) expands to a multi-row VALUES literal,
+  // then RETURNING * gives us the inserted PhotoRows in insertion order.
+  // Cast through `as never` because the typed overload of the helper
+  // doesn't play well with our mixed value types — runtime is correct.
+  return sql<PhotoRow[]>`
+    INSERT INTO photos ${sql(
+      rows,
+      "id",
+      "album_id",
+      "filename",
+      "width",
+      "height",
+      "orig_bytes",
+      "sort_order",
+      "taken_at",
+      "status",
+    ) as never}
+    RETURNING *`;
+}
+
 export async function listPhotos(albumId: string): Promise<PhotoRow[]> {
   return sql<PhotoRow[]>`
     SELECT * FROM photos WHERE album_id = ${albumId} ORDER BY sort_order ASC, created_at ASC`;

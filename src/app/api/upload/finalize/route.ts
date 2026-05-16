@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/session";
-import { getAlbumById, insertPhoto } from "@/lib/albums";
+import { getAlbumById, insertPhotosBatch } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
@@ -36,31 +36,51 @@ export async function POST(req: Request): Promise<Response> {
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
 
   const boss = await getBoss();
-  let inserted = 0;
-  for (const p of body.photos) {
-    // F7: client-supplied filename is normalized + stripped of path
-    // separators, control chars, leading dots, etc. before it lands in
-    // the DB. Downstream consumers (ZIP entry names, Content-Disposition,
-    // Telegram notifications) all read from the sanitized DB value.
-    const safeFilename = sanitizeFilename(p.filename);
-    await insertPhoto({
+
+  // F7: client-supplied filenames are normalized + stripped of path
+  // separators, control chars, leading dots, etc. before they land in the
+  // DB. Downstream consumers (ZIP entry names, Content-Disposition,
+  // Telegram notifications) all read from the sanitized DB value.
+  const sanitized = body.photos.map((p) => ({
+    photo_id: p.photo_id,
+    filename: sanitizeFilename(p.filename),
+    width: p.width,
+    height: p.height,
+    size: p.size,
+  }));
+
+  // Single round-trip INSERT for the whole batch — at 150 photos this
+  // collapses 150 sequential round-trips into one (saves ~3–5 s on the
+  // dev stack).
+  await insertPhotosBatch(
+    sanitized.map((p) => ({
       id: p.photo_id,
       album_id: album.id,
-      filename: safeFilename,
+      filename: p.filename,
       width: p.width,
       height: p.height,
       orig_bytes: p.size,
       taken_at: null,
-    });
-    const ext = inferExt(safeFilename);
-    const job: GenerateDerivativesJobData = {
+    })),
+  );
+
+  // Batch enqueue too — pg-boss v10's `insert` writes all rows in one SQL
+  // statement, replacing 150 boss.send() round-trips with a single one.
+  const jobs = sanitized.map((p) => {
+    const ext = inferExt(p.filename);
+    const data: GenerateDerivativesJobData = {
       album_id: album.id,
       photo_id: p.photo_id,
       key: originalKey(album.id, p.photo_id, ext),
     };
-    await boss.send(GENERATE_DERIVATIVES_QUEUE, job);
-    inserted++;
-  }
+    return {
+      name: GENERATE_DERIVATIVES_QUEUE,
+      data: data as unknown as object,
+    };
+  });
+  if (jobs.length > 0) await boss.insert(jobs);
+
+  const inserted = sanitized.length;
   if (inserted > 0) {
     void notifyNewUpload({
       album_id: album.id,

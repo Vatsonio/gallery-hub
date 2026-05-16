@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { sql } from "@/lib/db";
 import {
   createAlbum, getAlbumBySlug, listAlbums, updateAlbum,
-  softDeleteAlbum, listPhotos, insertPhoto, setCover,
+  softDeleteAlbum, listPhotos, insertPhoto, insertPhotosBatch, setCover,
   reorderPhotos, deletePhoto, markPhotoReady
 } from "@/lib/albums";
 import { runMigrations } from "@/../scripts/migrate";
@@ -51,5 +51,40 @@ describe("albums repo", () => {
     await deletePhoto(p1.id);
     const after = await listPhotos(a.id);
     expect(after.length).toBe(1);
+  });
+
+  it("insertPhotosBatch writes N rows in one round-trip with monotonic sort_order", async () => {
+    const a = await createAlbum({ title: "Batch", subtitle: null, status: "draft" });
+    // Pre-seed one photo so we can verify base = MAX(sort_order)+1.
+    const seed = await insertPhoto({
+      id: crypto.randomUUID(),
+      album_id: a.id,
+      filename: "seed.jpg",
+      width: 10,
+      height: 10,
+      orig_bytes: 1,
+      taken_at: null,
+    });
+    const batch = Array.from({ length: 5 }, (_v, i) => ({
+      id: crypto.randomUUID(),
+      album_id: a.id,
+      filename: `batch-${i}.jpg`,
+      width: 100,
+      height: 80,
+      orig_bytes: 9000 + i,
+      taken_at: null,
+    }));
+    const inserted = await insertPhotosBatch(batch);
+    expect(inserted.length).toBe(5);
+    expect(inserted.every((p) => p.status === "processing")).toBe(true);
+    // Sort order must continue from seed's sort_order.
+    const all = await listPhotos(a.id);
+    expect(all[0].id).toBe(seed.id);
+    expect(all.slice(1).map((p) => p.filename)).toEqual(["batch-0.jpg", "batch-1.jpg", "batch-2.jpg", "batch-3.jpg", "batch-4.jpg"]);
+  });
+
+  it("insertPhotosBatch is a no-op on empty input", async () => {
+    const out = await insertPhotosBatch([]);
+    expect(out).toEqual([]);
   });
 });
