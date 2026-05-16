@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   progressRatio,
   progressReducer,
+  shouldForceComplete,
 } from "@/components/gallery/PageLoadProgress";
 
 describe("progressReducer", () => {
@@ -81,5 +82,42 @@ describe("progressRatio", () => {
 
   it("returns exactly 1 at full progress (so the consumer can schedule fade-out reliably)", () => {
     expect(progressRatio({ registered: 8, loaded: 8 })).toBe(1);
+  });
+});
+
+describe("shouldForceComplete (stall safety net)", () => {
+  const THRESHOLD = 10_000;
+
+  it("does not snap before the threshold elapses (slow first paint stays honest)", () => {
+    expect(
+      shouldForceComplete(true, { registered: 5, loaded: 2 }, 9_999, THRESHOLD),
+    ).toBe(false);
+  });
+
+  it("snaps once the threshold elapses with progress stuck below 100%", () => {
+    expect(
+      shouldForceComplete(true, { registered: 5, loaded: 2 }, 10_000, THRESHOLD),
+    ).toBe(true);
+    expect(
+      shouldForceComplete(true, { registered: 5, loaded: 4 }, 30_000, THRESHOLD),
+    ).toBe(true);
+  });
+
+  it("never snaps when the bar is already at 100% — nothing to rescue", () => {
+    expect(
+      shouldForceComplete(true, { registered: 5, loaded: 5 }, 30_000, THRESHOLD),
+    ).toBe(false);
+  });
+
+  it("never snaps when no tile has registered (empty album)", () => {
+    expect(
+      shouldForceComplete(true, { registered: 0, loaded: 0 }, 30_000, THRESHOLD),
+    ).toBe(false);
+  });
+
+  it("never snaps when disabled (provider sees zero photos overall)", () => {
+    expect(
+      shouldForceComplete(false, { registered: 5, loaded: 2 }, 30_000, THRESHOLD),
+    ).toBe(false);
   });
 });

@@ -25,9 +25,20 @@ interface Props {
 export default function CoverImage({ src, avifSrc, alt = "", className }: Props) {
   const progress = usePhotoLoadProgress();
   const reportedRef = useRef(false);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     progress.register();
+    // Cached-image race: if the cover was served from preload (rel=preload
+    // with as=image in the share page head) it can already be `complete`
+    // by the time React attaches onLoad. Without this manual check the
+    // event never fires and the progress bar freezes at (N-1)/N forever.
+    // See PhotoTile for the same workaround on grid tiles.
+    const el = imgRef.current;
+    if (el && el.complete && !reportedRef.current) {
+      reportedRef.current = true;
+      progress.reportLoaded();
+    }
     // Stable api — see PhotoTile for the same rationale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -42,6 +53,7 @@ export default function CoverImage({ src, avifSrc, alt = "", className }: Props)
     <picture>
       {avifSrc ? <source srcSet={avifSrc} type="image/avif" /> : null}
       <img
+        ref={imgRef}
         src={src}
         alt={alt}
         fetchPriority="high"

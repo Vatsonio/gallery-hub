@@ -90,6 +90,38 @@ export function progressRatio(counter: Counter): number {
   return r;
 }
 
+/**
+ * Decide whether the stall safety net should snap the bar to 100%.
+ *
+ * Centralizes the policy so it can be exercised from a unit test
+ * without needing fake timers + a renderer. The provider component
+ * encodes the same predicate inline (with a real setTimeout), so we
+ * keep this helper authoritative for the rules.
+ *
+ * Inputs:
+ *   - `enabled`: false when there's no gallery to track (empty album).
+ *   - `counter`: live counter snapshot.
+ *   - `msSinceLastProgress`: elapsed ms since the last register/loaded.
+ *   - `thresholdMs`: how long to wait before snapping.
+ *
+ * Snap conditions (all must hold):
+ *   - feature enabled
+ *   - something has registered (otherwise nothing to snap to)
+ *   - we're not already complete (loaded < registered)
+ *   - we've been silent for at least `thresholdMs`
+ */
+export function shouldForceComplete(
+  enabled: boolean,
+  counter: Counter,
+  msSinceLastProgress: number,
+  thresholdMs: number,
+): boolean {
+  if (!enabled) return false;
+  if (counter.registered <= 0) return false;
+  if (counter.loaded >= counter.registered) return false;
+  return msSinceLastProgress >= thresholdMs;
+}
+
 export interface PhotoLoadProgressApi {
   /**
    * Mount-time call — bumps the expected total. Pair with one
@@ -125,6 +157,14 @@ interface ProviderProps {
 }
 
 /**
+ * Maximum time, in ms, the bar will wait for stalled images before
+ * snapping itself to 100%. Aggressive enough that a hung CDN or a
+ * blocked imgproxy request can't freeze the bar forever, but generous
+ * enough that a slow 3G first paint still completes naturally.
+ */
+const STALL_TIMEOUT_MS = 10_000;
+
+/**
  * Provider + visible progress bar in one. Keeps state local — the parent
  * gallery shell mounts it once and any descendant tile picks up the
  * api via usePhotoLoadProgress().
@@ -135,6 +175,9 @@ export default function PageLoadProgress({ cap, enabled, children }: ProviderPro
   // Once the bar has reached 100% AND faded, we stop rendering. The grace
   // window is the holdDelay (300ms) + fade duration (200ms) ≈ 500ms.
   const [done, setDone] = useState(false);
+  // Forced 100% latch — flipped by the stall safety net so the bar fills
+  // even if the underlying counter is still mid-way.
+  const [forceComplete, setForceComplete] = useState(false);
 
   const register = useCallback(() => {
     if (registeredRef.current >= cap) return;
@@ -146,7 +189,31 @@ export default function PageLoadProgress({ cap, enabled, children }: ProviderPro
     dispatch({ kind: "loaded" });
   }, []);
 
-  const ratio = progressRatio(counter);
+  // Honest ratio derived from counters. The visible ratio (below) is
+  // max(honest, 1 if forceComplete) so the safety-net snap is purely
+  // additive — a normally-resolving page never sees this branch.
+  const honestRatio = progressRatio(counter);
+  const ratio = forceComplete ? 1 : honestRatio;
+
+  // Safety net: if no progress arrives for STALL_TIMEOUT_MS after the
+  // first register, snap to 100%. This covers the edge case where an
+  // <img> never fires onLoad/onError (cached image race + missed
+  // listener, or a tile that registered but whose request was aborted by
+  // the browser). Without this, the bar would freeze below 100% forever
+  // and the user would think the page is still loading.
+  //
+  // Policy is delegated to `shouldForceComplete` so the same predicate
+  // can be exercised from a unit test without a renderer or fake timers.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      if (shouldForceComplete(enabled, counter, STALL_TIMEOUT_MS, STALL_TIMEOUT_MS)) {
+        setForceComplete(true);
+      }
+    }, STALL_TIMEOUT_MS);
+    return () => window.clearTimeout(t);
+    // Re-arm whenever `loaded` advances — a tile resolving resets the
+    // stall clock to give the next one its full budget.
+  }, [enabled, counter, counter.registered, counter.loaded]);
 
   // Effect: schedule fade-out once the ratio hits 1. We deliberately do
   // this in an effect (not inline during render) so the bar finishes its
