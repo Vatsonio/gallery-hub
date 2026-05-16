@@ -18,6 +18,14 @@ const minioOrigins = [
   originOf(process.env.MINIO_ENDPOINT)
 ].filter(Boolean);
 
+// imgproxy serves every gallery image in the on-demand era. Allow the
+// public-facing origin in img-src so the browser can <img src=...> it,
+// and connect-src so a future <link rel=preload> works too.
+const imgproxyOrigins = [
+  originOf(process.env.PUBLIC_IMGPROXY_URL),
+  originOf(process.env.IMGPROXY_URL)
+].filter(Boolean);
+
 // Build next/image remotePatterns dynamically from the MinIO endpoints so the
 // gallery still works if someone switches to next/image down the line.
 function patternFromOrigin(value) {
@@ -37,16 +45,21 @@ const dynamicMinioPatterns = [
   patternFromOrigin(process.env.MINIO_ENDPOINT)
 ].filter(Boolean);
 
+const dynamicImgproxyPatterns = [
+  patternFromOrigin(process.env.PUBLIC_IMGPROXY_URL),
+  patternFromOrigin(process.env.IMGPROXY_URL)
+].filter(Boolean);
+
 const cspHeader = [
   "default-src 'self'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
-  `img-src 'self' data: blob: https: ${minioOrigins.join(" ")}`.trim(),
+  `img-src 'self' data: blob: https: ${minioOrigins.join(" ")} ${imgproxyOrigins.join(" ")}`.trim().replace(/\s+/g, " "),
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  `connect-src 'self' ${minioOrigins.join(" ")}`.trim(),
+  `connect-src 'self' ${minioOrigins.join(" ")} ${imgproxyOrigins.join(" ")}`.trim().replace(/\s+/g, " "),
   "upgrade-insecure-requests"
 ].join("; ");
 
@@ -63,7 +76,9 @@ const nextConfig = {
       { protocol: "http", hostname: "gallery-minio" },
       { protocol: "http", hostname: "localhost" },
       { protocol: "https", hostname: "gallery.divass.space" },
-      ...dynamicMinioPatterns
+      { protocol: "https", hostname: "img.gallery.divass.space" },
+      ...dynamicMinioPatterns,
+      ...dynamicImgproxyPatterns
     ]
   },
   async headers() {
