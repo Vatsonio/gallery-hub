@@ -58,4 +58,45 @@ describe("SESSION_PASSWORD production guard", () => {
     const { sessionOptions: fresh } = await import("@/lib/session");
     expect(fresh.password).toBe("p".repeat(40));
   });
+
+  // F1 regression — placeholder secrets must be rejected in production. The
+  // dev.bat-committed value `dev-demo-secret-thirty-two-chars-long-pls`
+  // satisfies the documented "32+ chars" rule, so an operator could paste it
+  // into a prod env file by accident and have a forgeable admin cookie.
+  it("rejects the known dev.bat placeholder in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_PASSWORD", "dev-demo-secret-thirty-two-chars-long-pls");
+    await expect(import("@/lib/session")).rejects.toThrow(
+      /known placeholder value/
+    );
+  });
+
+  it("rejects the .env.example placeholder in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_PASSWORD", "replace-me-with-a-32-plus-character-secret");
+    await expect(import("@/lib/session")).rejects.toThrow(
+      /known placeholder value/
+    );
+  });
+
+  it("rejects the in-source dev fallback in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv(
+      "SESSION_PASSWORD",
+      "dev-only-insecure-password-please-override-in-production-env"
+    );
+    await expect(import("@/lib/session")).rejects.toThrow(
+      /known placeholder value/
+    );
+  });
+
+  it("tolerates placeholder secrets in dev (warning-only)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SESSION_PASSWORD", "dev-demo-secret-thirty-two-chars-long-pls");
+    const { sessionOptions: fresh, isPlaceholderSessionPassword } = await import(
+      "@/lib/session"
+    );
+    expect(fresh.password).toBe("dev-demo-secret-thirty-two-chars-long-pls");
+    expect(isPlaceholderSessionPassword(fresh.password as string)).toBe(true);
+  });
 });

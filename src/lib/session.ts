@@ -6,15 +6,41 @@ export interface AdminSession {
   email?: string;
 }
 
+// Known-bad placeholder secrets that must never reach a running app. The
+// pentest report (F1) flagged that operators can paste the dev secret from
+// dev.bat into a prod env file: the value satisfies the documented "32+ chars"
+// rule and looks innocuous, but it is committed to public source control so
+// any reader of the repo can forge sessions. Anything matching this list
+// throws at boot (prod) or at first session read (dev).
+export const KNOWN_PLACEHOLDER_SESSION_PASSWORDS: ReadonlySet<string> = new Set([
+  "dev-demo-secret-thirty-two-chars-long-pls",
+  "replace-me-with-a-32-plus-character-secret",
+  "dev-only-insecure-password-please-override-in-production-env",
+]);
+
+export function isPlaceholderSessionPassword(value: string): boolean {
+  return KNOWN_PLACEHOLDER_SESSION_PASSWORDS.has(value);
+}
+
 function resolveSessionPassword(): string {
   const fromEnv = process.env.SESSION_PASSWORD;
-  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (fromEnv && fromEnv.length > 0) {
+    if (isPlaceholderSessionPassword(fromEnv) && process.env.NODE_ENV === "production") {
+      throw new Error(
+        "SESSION_PASSWORD is set to a known placeholder value in production. " +
+          "Generate a fresh secret with: openssl rand -hex 32"
+      );
+    }
+    return fromEnv;
+  }
   if (process.env.NODE_ENV === "production") {
     throw new Error(
       "SESSION_PASSWORD env var is required in production. " +
         "Generate one with: openssl rand -hex 32"
     );
   }
+  // Dev fallback: a long but obviously-placeholder string. Picked up by
+  // isPlaceholderSessionPassword so warnings stay loud.
   return "dev-only-insecure-password-please-override-in-production-env";
 }
 

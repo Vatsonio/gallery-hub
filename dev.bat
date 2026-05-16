@@ -52,7 +52,7 @@ if errorlevel 1 (
   docker run -d --name %MINIO_NAME% -p %MINIO_PORT%:9000 -p %MINIO_CONSOLE_PORT%:9001 ^
     -e MINIO_ROOT_USER=minio ^
     -e MINIO_ROOT_PASSWORD=minio12345 ^
-    -e MINIO_API_CORS_ALLOW_ORIGIN=* ^
+    -e MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:3000 ^
     minio/minio:latest server /data --console-address ":9001" >nul
 ) else (
   echo [minio] container exists - ensuring it's running ...
@@ -85,7 +85,21 @@ set MINIO_ACCESS_KEY=minio
 set MINIO_SECRET_KEY=minio12345
 set MINIO_BUCKET=gallery
 set MINIO_FORCE_PATH_STYLE=true
-set SESSION_PASSWORD=dev-demo-secret-thirty-two-chars-long-pls
+
+REM --- SESSION_PASSWORD: rotate per-boot (gitignored cache file) -----------
+REM Pentest F1 — the previous hardcoded dev secret was committed to source,
+REM so anyone with the repo could forge sessions against any dev instance.
+REM We now generate 32 random hex bytes on first boot and cache to
+REM .dev-session-password (gitignored). Delete the file to rotate.
+set "SESSION_FILE=.dev-session-password"
+if not exist "%SESSION_FILE%" (
+  for /f "delims=" %%S in ('node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"') do (
+    > "%SESSION_FILE%" echo %%S
+  )
+  echo [auth] generated fresh dev SESSION_PASSWORD ^(%SESSION_FILE%^)
+)
+set /p SESSION_PASSWORD=<"%SESSION_FILE%"
+
 set "PUBLIC_BASE_URL=http://localhost:%DEV_PORT%"
 set ADMIN_EMAIL=admin@divass.space
 set ADMIN_PASSWORD=demo1234
@@ -108,7 +122,7 @@ if errorlevel 1 (
 
 REM --- Worker (separate window) ---------------------------------------------
 echo [worker] launching derivatives worker in a new window ...
-start "gallery-worker" cmd /k "set DATABASE_URL=%DATABASE_URL%&& set MINIO_ENDPOINT=%MINIO_ENDPOINT%&& set MINIO_ACCESS_KEY=%MINIO_ACCESS_KEY%&& set MINIO_SECRET_KEY=%MINIO_SECRET_KEY%&& set MINIO_BUCKET=%MINIO_BUCKET%&& set MINIO_FORCE_PATH_STYLE=true&& set NODE_ENV=development&& npm run worker"
+start "gallery-worker" cmd /k "set DATABASE_URL=%DATABASE_URL%&& set MINIO_ENDPOINT=%MINIO_ENDPOINT%&& set MINIO_ACCESS_KEY=%MINIO_ACCESS_KEY%&& set MINIO_SECRET_KEY=%MINIO_SECRET_KEY%&& set MINIO_BUCKET=%MINIO_BUCKET%&& set MINIO_FORCE_PATH_STYLE=true&& set SESSION_PASSWORD=%SESSION_PASSWORD%&& set NODE_ENV=development&& npm run worker"
 
 echo.
 echo ============================================================
