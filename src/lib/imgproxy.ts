@@ -298,6 +298,70 @@ export function imgproxyLarge(s3Key: string, opts: Partial<ImgproxyOptions> = {}
   });
 }
 
+/**
+ * Build a responsive `srcset` string for a single photo at multiple widths,
+ * along with the matching `src` (the largest width — used as the fallback
+ * for clients that don't honour srcset, e.g. older spiders).
+ *
+ * Why a custom helper instead of inline string-building at the call site:
+ *   - the underlying `imgproxyWeb` helper hard-codes 1600×1600 and we need
+ *     the 400/800/1600 trio at minimum
+ *   - we want a single source of truth for the width->quality curve so a
+ *     thumbnail doesn't end up encoded at q86 (overkill on a 400px tile)
+ *   - mobile saving requires that the small variant be encoded at small
+ *     dimensions; calling imgproxyWeb 3× with format=auto would emit 3
+ *     URLs all at 1600px and only differ by ?w=, which is useless
+ *
+ * The returned `srcSet` is comma-separated per the HTML spec
+ * (`"<url> <w>w, <url> <w>w, ..."`). Pair with a sensible `sizes` attribute
+ * at the call site — the browser does NOT round-trip without one and
+ * defaults to `100vw`, which on a multi-column grid is the wrong thing.
+ */
+export interface ImgproxySrcsetResult {
+  /** Largest URL — assign to `<img src>` for non-srcset fallback. */
+  src: string;
+  /** `srcSet` attribute value. Comma-separated `"<url> <w>w"` pairs. */
+  srcSet: string;
+}
+
+/**
+ * Per-width quality tuning. Thumbnails benefit from lower quality (less
+ * detail to preserve), the web variant gets the historical q82 sweet
+ * spot, and larger variants creep up to q86 to keep grain.
+ */
+function qualityForWidth(w: number): number {
+  if (w <= 400) return 75;
+  if (w <= 800) return 80;
+  if (w <= 1600) return 82;
+  return 86;
+}
+
+export function imgproxySrcset(
+  s3Key: string,
+  widths: number[],
+  opts: Partial<Omit<ImgproxyOptions, "width" | "height">> = {},
+): ImgproxySrcsetResult {
+  if (widths.length === 0) {
+    throw new Error("imgproxySrcset requires at least one width");
+  }
+  const sorted = [...new Set(widths)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let largest = "";
+  for (const w of sorted) {
+    const url = buildImgproxyUrl(s3Key, {
+      width: w,
+      height: w,
+      resize: "fit",
+      format: "auto",
+      quality: qualityForWidth(w),
+      ...opts,
+    });
+    parts.push(`${url} ${w}w`);
+    largest = url;
+  }
+  return { src: largest, srcSet: parts.join(", ") };
+}
+
 // ---------------------------------------------------------------------------
 // Cache pre-warming. The first viewer of a freshly-uploaded photo pays a
 // 200–500 ms imgproxy cold-render cost per tile (libvips resize + AVIF

@@ -19,6 +19,19 @@ interface Props {
    * bytes; everywhere else falls back to webUrl automatically.
    */
   avifUrl?: string | null;
+  /**
+   * Optional responsive srcSet (`"<url> 400w, <url> 800w, <url> 1600w"`).
+   * When present the browser picks the most appropriate width for the
+   * actual layout box × DPR — mobile saves ~75% bytes vs always shipping
+   * 1600w. Pair with `sizes` (defaults to the tile's CSS width).
+   */
+  srcSet?: string | null;
+  /**
+   * `sizes` attribute hint for srcSet matching. Defaults to a sensible
+   * approximation of justified-row tile widths — pass an override at
+   * the call site when the layout shape is different (e.g. selections).
+   */
+  sizes?: string;
   /** flex-basis style for justified-row layout. */
   flexStyle: React.CSSProperties;
   initialFavorited: boolean;
@@ -60,6 +73,13 @@ export default function PhotoTile({
   href,
   webUrl,
   avifUrl,
+  srcSet,
+  // Default sizes hint: ~50vw at the mobile breakpoint (2 photos per row),
+  // ~33vw on tablets, ~25vw on desktop. Conservative enough that the
+  // browser doesn't downshift below the actual rendered width on retina
+  // displays; aggressive enough that the 400w variant gets selected on
+  // small viewports.
+  sizes = "(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw",
   flexStyle,
   initialFavorited,
   index = 0,
@@ -262,10 +282,12 @@ export default function PhotoTile({
         <img
           ref={imgRef}
           src={webUrl}
+          srcSet={srcSet ?? undefined}
+          sizes={srcSet ? sizes : undefined}
           alt=""
           loading={priority ? "eager" : "lazy"}
           decoding={priority ? "sync" : "async"}
-          fetchPriority={priority ? "high" : "auto"}
+          fetchPriority={priority ? "high" : "low"}
           draggable={false}
           onLoad={onImgResolved}
           onError={onImgResolved}

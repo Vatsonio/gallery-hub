@@ -12,7 +12,7 @@ import {
 import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
 import { originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";
-import { imgproxyWeb, imgproxyLarge, photoVersionSeed } from "@/lib/imgproxy";
+import { imgproxyWeb, imgproxyLarge, imgproxySrcset, photoVersionSeed } from "@/lib/imgproxy";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { watermarkKey } from "@/lib/watermarks";
 import { layoutJustifiedRows } from "@/lib/justified";
@@ -106,9 +106,22 @@ export default async function PublicGalleryPage({ params }: Props) {
       photos.map((p) => {
         const origKey = originalKey(album.id, p.id, resolveOriginalExt(p.filename));
         const version = photoVersionSeed(p.updated_at);
+        // 400/800/1600 trio is the sweet spot for justified-row tile sizes:
+        // - 400w covers mobile 2-per-row (~187 CSS px × 2 DPR ≈ 374 px)
+        // - 800w covers tablet 3-per-row + retina mobile lightbox previews
+        // - 1600w covers desktop hero rows and HiDPI panels
+        // We bake the watermark / version params into every variant so the
+        // entire ladder invalidates atomically on watermark toggle / edit.
+        const srcset = imgproxySrcset(origKey, [400, 800, 1600], {
+          version,
+          watermark: watermarkRef,
+        });
         return {
           ...p,
-          web_url: imgproxyWeb(origKey, { version, watermark: watermarkRef }),
+          // `web_url` is the 1600w fallback; modern browsers pick from
+          // srcset, IE11/old spiders hit this URL.
+          web_url: srcset.src,
+          web_srcset: srcset.srcSet,
           // imgproxy negotiates format from the Accept header (AVIF→WEBP→JPEG)
           // so the <picture> <source type="image/avif"> dance is no longer
           // needed. Pass null through so the renderer skips the AVIF branch.
@@ -293,21 +306,31 @@ export default async function PublicGalleryPage({ params }: Props) {
                         ["--row-h" as string]: `${Math.round(row.height)}px`,
                       }}
                     >
-                      {row.items.map((item) => (
-                        <PhotoTile
-                          key={item.id}
-                          token={token}
-                          photoId={item.id}
-                          href={`/a/${token}/p/${item.id}`}
-                          webUrl={photoMap.get(item.id)!.web_url}
-                          avifUrl={photoMap.get(item.id)!.avif_url}
-                          thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
-                          flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                          initialFavorited={favSet.has(item.id)}
-                          index={photoIndex.get(item.id) ?? 0}
-                          priority={i === 0}
-                        />
-                      ))}
+                      {row.items.map((item) => {
+                        const idx = photoIndex.get(item.id) ?? 0;
+                        const p = photoMap.get(item.id)!;
+                        return (
+                          <PhotoTile
+                            key={item.id}
+                            token={token}
+                            photoId={item.id}
+                            href={`/a/${token}/p/${item.id}`}
+                            webUrl={p.web_url}
+                            avifUrl={p.avif_url}
+                            srcSet={p.web_srcset}
+                            thumbhashDataUrl={p.thumbhash_url}
+                            flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                            initialFavorited={favSet.has(item.id)}
+                            index={idx}
+                            // W4: only the first 32 tiles get fetchPriority=high
+                            // + loading="eager". Everything below that drops to
+                            // fetchPriority="low" + loading="lazy" so the
+                            // browser saves bandwidth for what the viewer can
+                            // actually see.
+                            priority={idx < 32}
+                          />
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -325,21 +348,31 @@ export default async function PublicGalleryPage({ params }: Props) {
                         ["--row-h" as string]: `${Math.round(row.height)}px`,
                       }}
                     >
-                      {row.items.map((item) => (
-                        <PhotoTile
-                          key={item.id}
-                          token={token}
-                          photoId={item.id}
-                          href={`/a/${token}/p/${item.id}`}
-                          webUrl={photoMap.get(item.id)!.web_url}
-                          avifUrl={photoMap.get(item.id)!.avif_url}
-                          thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
-                          flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                          initialFavorited={favSet.has(item.id)}
-                          index={photoIndex.get(item.id) ?? 0}
-                          priority={i === 0}
-                        />
-                      ))}
+                      {row.items.map((item) => {
+                        const idx = photoIndex.get(item.id) ?? 0;
+                        const p = photoMap.get(item.id)!;
+                        return (
+                          <PhotoTile
+                            key={item.id}
+                            token={token}
+                            photoId={item.id}
+                            href={`/a/${token}/p/${item.id}`}
+                            webUrl={p.web_url}
+                            avifUrl={p.avif_url}
+                            srcSet={p.web_srcset}
+                            thumbhashDataUrl={p.thumbhash_url}
+                            flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                            initialFavorited={favSet.has(item.id)}
+                            index={idx}
+                            // W4: only the first 32 tiles get fetchPriority=high
+                            // + loading="eager". Everything below that drops to
+                            // fetchPriority="low" + loading="lazy" so the
+                            // browser saves bandwidth for what the viewer can
+                            // actually see.
+                            priority={idx < 32}
+                          />
+                        );
+                      })}
                     </div>
                   );
                 })}

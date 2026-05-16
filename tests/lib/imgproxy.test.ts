@@ -5,6 +5,7 @@ import {
   imgproxyThumb,
   imgproxyWeb,
   imgproxyLarge,
+  imgproxySrcset,
   isImgproxyEnabled,
   photoVersionSeed,
   warmImgproxyVariants,
@@ -179,6 +180,52 @@ describe("imgproxy URL builder", () => {
     const undershoot = buildImgproxyUrl("albums/a/p/original.jpg", { quality: -50 });
     expect(overshoot).toContain("/quality:100/");
     expect(undershoot).toContain("/quality:1/");
+  });
+});
+
+describe("imgproxySrcset", () => {
+  beforeEach(setupEnv);
+  afterEach(tearDownEnv);
+
+  it("emits one URL per width plus a srcSet string ordered ascending", () => {
+    const r = imgproxySrcset("albums/a/p/original.jpg", [1600, 400, 800]);
+    // Sorted ascending and de-duplicated.
+    const matches = r.srcSet.match(/(\d+)w/g);
+    expect(matches).toEqual(["400w", "800w", "1600w"]);
+    // `src` is the largest width URL so non-srcset fallback gets the best
+    // single image.
+    expect(r.src).toContain("/resize:fit:1600:1600:0/");
+  });
+
+  it("tunes quality per width (low quality for small thumbs)", () => {
+    const r = imgproxySrcset("albums/a/p/original.jpg", [400, 800, 1600]);
+    // Pull each width's URL out of the comma-separated srcSet.
+    const segs = r.srcSet.split(",").map((s) => s.trim());
+    const find = (w: string) => segs.find((s) => s.endsWith(w))!;
+    expect(find("400w")).toContain("/quality:75/");
+    expect(find("800w")).toContain("/quality:80/");
+    expect(find("1600w")).toContain("/quality:82/");
+  });
+
+  it("threads watermark + version params through every variant", () => {
+    const r = imgproxySrcset(
+      "albums/a/p/original.jpg",
+      [400, 800, 1600],
+      { version: 1234567890, watermark: { key: "watermarks/album123.png" } },
+    );
+    const urls = r.srcSet.split(",").map((s) => s.trim().split(" ")[0]);
+    expect(urls.every((u) => u.includes("/cachebuster:1234567890/"))).toBe(true);
+    expect(urls.every((u) => u.includes("/watermark:0.6:soea:20:0.25/"))).toBe(true);
+  });
+
+  it("throws when called with an empty widths array", () => {
+    expect(() => imgproxySrcset("albums/a/p/original.jpg", [])).toThrow(/at least one/);
+  });
+
+  it("dedupes duplicate widths so the srcSet stays minimal", () => {
+    const r = imgproxySrcset("albums/a/p/original.jpg", [400, 400, 800]);
+    const matches = r.srcSet.match(/(\d+)w/g);
+    expect(matches).toEqual(["400w", "800w"]);
   });
 });
 

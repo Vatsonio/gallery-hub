@@ -9,7 +9,7 @@ import {
 import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
 import { originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";
-import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
+import { imgproxySrcset, photoVersionSeed } from "@/lib/imgproxy";
 import { watermarkKey } from "@/lib/watermarks";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { layoutJustifiedRows } from "@/lib/justified";
@@ -123,9 +123,14 @@ export default async function FavoritesPage({ params }: Props) {
   const decorated = ordered.map((p) => {
     const origKey = originalKey(album.id, p.id, resolveOriginalExt(p.filename));
     const version = photoVersionSeed(p.updated_at);
+    const srcset = imgproxySrcset(origKey, [400, 800, 1600], {
+      version,
+      watermark: watermarkRef,
+    });
     return {
       ...p,
-      web_url: imgproxyWeb(origKey, { version, watermark: watermarkRef }),
+      web_url: srcset.src,
+      web_srcset: srcset.srcSet,
       // Accept-header negotiation removes the need for a separate AVIF URL.
       avif_url: null as string | null,
       thumbhash_url: thumbhashToDataUrl(p.thumbhash),
@@ -179,20 +184,26 @@ export default async function FavoritesPage({ params }: Props) {
                   ["--row-h" as string]: `${Math.round(row.height)}px`,
                 }}
               >
-                {row.items.map((item) => (
-                  <PhotoTile
-                    key={item.id}
-                    token={token}
-                    photoId={item.id}
-                    href={`/a/${token}/p/${item.id}`}
-                    webUrl={photoMap.get(item.id)!.web_url}
-                    avifUrl={photoMap.get(item.id)!.avif_url}
-                    thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
-                    flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                    initialFavorited={true}
-                    index={photoIndex.get(item.id) ?? 0}
-                  />
-                ))}
+                {row.items.map((item) => {
+                  const idx = photoIndex.get(item.id) ?? 0;
+                  const p = photoMap.get(item.id)!;
+                  return (
+                    <PhotoTile
+                      key={item.id}
+                      token={token}
+                      photoId={item.id}
+                      href={`/a/${token}/p/${item.id}`}
+                      webUrl={p.web_url}
+                      avifUrl={p.avif_url}
+                      srcSet={p.web_srcset}
+                      thumbhashDataUrl={p.thumbhash_url}
+                      flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      initialFavorited={true}
+                      index={idx}
+                      priority={idx < 32}
+                    />
+                  );
+                })}
               </div>
             );
           })}
@@ -210,20 +221,26 @@ export default async function FavoritesPage({ params }: Props) {
                   ["--row-h" as string]: `${Math.round(row.height)}px`,
                 }}
               >
-                {row.items.map((item) => (
-                  <PhotoTile
-                    key={item.id}
-                    token={token}
-                    photoId={item.id}
-                    href={`/a/${token}/p/${item.id}`}
-                    webUrl={photoMap.get(item.id)!.web_url}
-                    avifUrl={photoMap.get(item.id)!.avif_url}
-                    thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
-                    flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                    initialFavorited={true}
-                    index={photoIndex.get(item.id) ?? 0}
-                  />
-                ))}
+                {row.items.map((item) => {
+                  const idx = photoIndex.get(item.id) ?? 0;
+                  const p = photoMap.get(item.id)!;
+                  return (
+                    <PhotoTile
+                      key={item.id}
+                      token={token}
+                      photoId={item.id}
+                      href={`/a/${token}/p/${item.id}`}
+                      webUrl={p.web_url}
+                      avifUrl={p.avif_url}
+                      srcSet={p.web_srcset}
+                      thumbhashDataUrl={p.thumbhash_url}
+                      flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      initialFavorited={true}
+                      index={idx}
+                      priority={idx < 32}
+                    />
+                  );
+                })}
               </div>
             );
           })}
