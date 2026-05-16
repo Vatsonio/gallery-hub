@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import {
   getBoss,
   GENERATE_DERIVATIVES_QUEUE,
@@ -12,6 +13,17 @@ import { reapStaleExports } from "./exportReaper";
 import { handleNotificationJob } from "./notifications";
 import { checkStorageQuota } from "@/lib/storage-monitor";
 import type { GenerateDerivativesJobData } from "@/lib/types";
+
+// Cap libvips threads per encode. sharp defaults to "host CPU count",
+// which oversubscribes badly when batchSize > 1: with batchSize=6 and 5
+// variants generated in parallel per job, libvips wants 6 × 5 × N_cpu
+// threads — they all contend for the same cores and throughput stalls.
+// At 2 threads per encode (instead of N_cpu) the per-image work is
+// slightly slower in isolation but the batch parallelism wins
+// substantially. Sharp's docs explicitly recommend this pattern for
+// concurrent-job workers.
+const SHARP_CONCURRENCY = parseInt(process.env.SHARP_CONCURRENCY ?? "2", 10);
+sharp.concurrency(SHARP_CONCURRENCY > 0 ? SHARP_CONCURRENCY : 2);
 
 // How many derivative jobs to process concurrently in one worker process.
 // 4–8 is the sweet spot on a 4-core dev box: above ~12 sharp's libvips
@@ -28,7 +40,7 @@ function resolveBatchSize(): number {
 async function main(): Promise<void> {
   const boss = await getBoss();
   const batchSize = resolveBatchSize();
-  console.log(`[worker] started, schema=pgboss_gallery, derivatives batchSize=${batchSize}`);
+  console.log(`[worker] started, schema=pgboss_gallery, derivatives batchSize=${batchSize}, sharp.concurrency=${SHARP_CONCURRENCY}`);
 
   await boss.work<GenerateDerivativesJobData>(
     GENERATE_DERIVATIVES_QUEUE,
