@@ -190,12 +190,18 @@ export async function GET(
   }
 
   // Build a fresh ZIP and fan out to both the HTTP response and MinIO.
+  //
+  // imgproxy era: variants no longer pre-exist in MinIO (imgproxy resizes
+  // on demand). For both `variant=original` and `variant=web` we stream
+  // the original bytes — routing the export through imgproxy would waste
+  // an extra encode pass per photo, and "web" exports are rare enough
+  // that the size delta isn't worth it. The query-string still accepts
+  // `variant=web` for backwards compatibility with existing share-link
+  // URLs; it just maps to the same keys.
   const albumId = status.link.album_id;
   async function* gen(): AsyncGenerator<ZipEntry> {
     for (const p of photos) {
-      const key = variant === "original"
-        ? originalKeyForPhoto(albumId, p.id, p.filename)
-        : variantKey(albumId, p.id, "large");
+      const key = originalKeyForPhoto(albumId, p.id, p.filename);
       const body = await getObjectStream(key);
       yield {
         name: `${String(p.sort_order + 1).padStart(3, "0")}-${p.filename}`,
@@ -203,6 +209,9 @@ export async function GET(
       };
     }
   }
+  // variantKey is no longer reached for export streaming; reference it
+  // through a void to keep the import bookkeeping deterministic.
+  void variantKey;
 
   const { toHttp, toMinio, done } = createFanOutZip(gen());
 
@@ -229,11 +238,11 @@ export async function GET(
     console.error("[export] archive build failed", err);
   });
 
-  // Approximate byte total from the per-variant size columns. Falls back to
-  // 0 for legacy photos that haven't been backfilled yet.
-  const sizeCol = variant === "original" ? "orig_bytes" : "large_bytes";
+  // Byte total — always orig_bytes now that imgproxy resizes everything
+  // on demand. The legacy `large_bytes` column is preserved for rollback
+  // visibility but no longer used by the export path.
   const sizeRow = await sql<{ total: string | null }[]>`
-    SELECT COALESCE(SUM(${sql.unsafe(sizeCol)}), 0)::text AS total
+    SELECT COALESCE(SUM(orig_bytes), 0)::text AS total
       FROM photos
      WHERE id = ANY(${photos.map((p) => p.id)}::uuid[])
   `;
