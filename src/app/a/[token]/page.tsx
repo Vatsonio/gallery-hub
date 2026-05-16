@@ -9,10 +9,12 @@ import {
   resolveShareLinkStatus,
   unlockCookieName,
 } from "@/lib/share";
-import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey, avifVariantKey } from "@/lib/keys";
+import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyWeb, imgproxyLarge, photoVersionSeed } from "@/lib/imgproxy";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
+import { watermarkKey } from "@/lib/watermarks";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
   ADMIN_PREVIEW_VIEWER_ID,
@@ -90,23 +92,26 @@ export default async function PublicGalleryPage({ params }: Props) {
     : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
   const photos = (await listPhotos(album.id)).filter((p) => p.status === "ready");
+
+  // Resolve the album-level watermark once. The PNG (rendered + uploaded on
+  // first toggle by AlbumSettingsPanel's server action) lives at
+  // watermarks/{albumId}.png; imgproxy composites it onto every resized
+  // variant via the wm_url processing step.
+  const albumWatermark = await getAlbumWatermark(album.id);
+  const watermarkRef = albumWatermark.enabled ? { key: watermarkKey(album.id) } : null;
+
   const [decorated, favoriteIds] = await Promise.all([
-    Promise.all(
-      photos.map(async (p) => {
-        const [webUrl, avifUrl] = await Promise.all([
-          presignGet(variantKey(album.id, p.id, "web"), 3600, {
-            responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-          }),
-          p.avif_bytes_web
-            ? presignGet(avifVariantKey(album.id, p.id, "web"), 3600, {
-                responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-              })
-            : Promise.resolve(null),
-        ]);
+    Promise.resolve(
+      photos.map((p) => {
+        const origKey = originalKey(album.id, p.id, resolveOriginalExt(p.filename));
+        const version = photoVersionSeed(p.updated_at);
         return {
           ...p,
-          web_url: webUrl,
-          avif_url: avifUrl,
+          web_url: imgproxyWeb(origKey, { version, watermark: watermarkRef }),
+          // imgproxy negotiates format from the Accept header (AVIF→WEBP→JPEG)
+          // so the <picture> <source type="image/avif"> dance is no longer
+          // needed. Pass null through so the renderer skips the AVIF branch.
+          avif_url: null as string | null,
           thumbhash_url: thumbhashToDataUrl(p.thumbhash),
         };
       }),
@@ -119,15 +124,14 @@ export default async function PublicGalleryPage({ params }: Props) {
   const coverPhoto =
     decorated.find((p) => p.id === album.cover_photo_id) ?? decorated[0] ?? null;
   const coverUrl = coverPhoto
-    ? await presignGet(variantKey(album.id, coverPhoto.id, "large"), 3600, {
-        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-      })
+    ? imgproxyLarge(
+        originalKey(album.id, coverPhoto.id, resolveOriginalExt(coverPhoto.filename)),
+        { version: photoVersionSeed(coverPhoto.updated_at), watermark: watermarkRef },
+      )
     : null;
-  const coverAvifUrl = coverPhoto && coverPhoto.avif_bytes_large
-    ? await presignGet(avifVariantKey(album.id, coverPhoto.id, "large"), 3600, {
-        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-      })
-    : null;
+  // Accept-header negotiation means we no longer hand the browser two
+  // separate (WEBP + AVIF) URLs — imgproxy picks per request.
+  const coverAvifUrl: string | null = null;
 
   // Compute TWO justified-rows layouts so mobile gets 2-photo rows and desktop
   // keeps the dense reference layout. flex-basis lets CSS scale either to viewport.

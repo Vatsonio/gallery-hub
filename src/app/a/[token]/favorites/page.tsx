@@ -6,9 +6,11 @@ import {
   resolveShareLinkStatus,
   unlockCookieName,
 } from "@/lib/share";
-import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey, avifVariantKey } from "@/lib/keys";
+import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
+import { watermarkKey } from "@/lib/watermarks";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
@@ -115,26 +117,20 @@ export default async function FavoritesPage({ params }: Props) {
   const byId = new Map(allPhotos.map((p) => [p.id, p]));
   const ordered = favIds.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
 
-  const decorated = await Promise.all(
-    ordered.map(async (p) => {
-      const [webUrl, avifUrl] = await Promise.all([
-        presignGet(variantKey(album.id, p.id, "web"), 3600, {
-          responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-        }),
-        p.avif_bytes_web
-          ? presignGet(avifVariantKey(album.id, p.id, "web"), 3600, {
-              responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-            })
-          : Promise.resolve(null),
-      ]);
-      return {
-        ...p,
-        web_url: webUrl,
-        avif_url: avifUrl,
-        thumbhash_url: thumbhashToDataUrl(p.thumbhash),
-      };
-    }),
-  );
+  const albumWatermark = await getAlbumWatermark(album.id);
+  const watermarkRef = albumWatermark.enabled ? { key: watermarkKey(album.id) } : null;
+
+  const decorated = ordered.map((p) => {
+    const origKey = originalKey(album.id, p.id, resolveOriginalExt(p.filename));
+    const version = photoVersionSeed(p.updated_at);
+    return {
+      ...p,
+      web_url: imgproxyWeb(origKey, { version, watermark: watermarkRef }),
+      // Accept-header negotiation removes the need for a separate AVIF URL.
+      avif_url: null as string | null,
+      thumbhash_url: thumbhashToDataUrl(p.thumbhash),
+    };
+  });
 
   const totalBytes = decorated.reduce((s, p) => s + Number(p.orig_bytes ?? 0), 0);
   const sizeLabel = formatBytes(totalBytes);
