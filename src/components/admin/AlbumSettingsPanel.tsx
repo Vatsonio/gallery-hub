@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Image as ImageIcon, Stamp, RefreshCw } from "lucide-react";
+import { Image as ImageIcon, Stamp, RefreshCw, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +13,13 @@ import {
 } from "@/app/admin/albums/actions";
 import { useToast } from "@/components/ui/Toast";
 import type { AlbumRow } from "@/lib/types";
+
+interface WarmAlbumResponseLike {
+  warmed: number;
+  total: number;
+  skipped?: string;
+  error?: string;
+}
 
 interface Props {
   album: Pick<AlbumRow, "id" | "slug" | "title" | "subtitle" | "status" | "cover_photo_id"> & {
@@ -31,6 +38,8 @@ export function AlbumSettingsPanel({ album }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [regenPending, startRegen] = useTransition();
+  const [warming, setWarming] = useState(false);
+  const [warmProgress, setWarmProgress] = useState<{ warmed: number; total: number } | null>(null);
 
   function saveWatermark() {
     setErr(null);
@@ -73,6 +82,50 @@ export function AlbumSettingsPanel({ album }: Props) {
         toast.error(`Regenerate failed: ${message}`);
       }
     });
+  }
+
+  /**
+   * Walks the imgproxy cache by hitting every photo's thumb + web URL,
+   * server-side. The server endpoint awaits the whole batch (concurrency
+   * 6) so when this resolves the cache is genuinely warm. Useful before
+   * a client preview session — eliminates the 200-500ms cold-encode the
+   * first viewer would otherwise pay per tile.
+   */
+  async function warmCache(): Promise<void> {
+    setErr(null);
+    setMsg(null);
+    setWarming(true);
+    setWarmProgress(null);
+    try {
+      const res = await fetch(`/api/admin/albums/${album.slug}/warm`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const j = (await res.json().catch(() => null)) as WarmAlbumResponseLike | null;
+      if (!res.ok || !j) {
+        const m = j?.error ?? `warm failed: ${res.status}`;
+        setErr(m);
+        toast.error(m);
+        return;
+      }
+      if (j.skipped === "imgproxy-disabled") {
+        setMsg("Imgproxy is disabled — nothing to warm.");
+        toast.info("Imgproxy disabled");
+        return;
+      }
+      setWarmProgress({ warmed: j.warmed, total: j.total });
+      const label = j.total === 0 ? "no photos" : `${j.warmed} of ${j.total} photos`;
+      setMsg(`Warmed ${label}`);
+      toast.success(`Cache warmed (${label})`);
+    } catch (e) {
+      const m = (e as Error).message;
+      setErr(m);
+      toast.error(`Warm failed: ${m}`);
+    } finally {
+      setWarming(false);
+    }
   }
 
   return (
@@ -138,6 +191,20 @@ export function AlbumSettingsPanel({ album }: Props) {
             >
               <RefreshCw className="mr-2 h-4 w-4" aria-hidden />
               {regenPending ? "Queuing…" : "Regenerate variants"}
+            </Button>
+            <Button
+              onClick={warmCache}
+              disabled={warming}
+              variant="outline"
+              className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+              title="Hits imgproxy for every photo so the first viewer sees instant tiles."
+            >
+              <Flame className="mr-2 h-4 w-4 text-amber-400" aria-hidden />
+              {warming
+                ? warmProgress
+                  ? `Warming ${warmProgress.warmed}/${warmProgress.total}…`
+                  : "Warming…"
+                : "Warm cache"}
             </Button>
           </div>
           {msg && <p className="text-xs text-emerald-400">{msg}</p>}
