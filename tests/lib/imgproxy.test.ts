@@ -6,6 +6,7 @@ import {
   imgproxyWeb,
   imgproxyLarge,
   isImgproxyEnabled,
+  photoVersionSeed,
   __resetImgproxyContextForTests,
 } from "@/lib/imgproxy";
 
@@ -174,5 +175,33 @@ describe("imgproxy URL builder", () => {
     const undershoot = buildImgproxyUrl("albums/a/p/original.jpg", { quality: -50 });
     expect(overshoot).toContain("/quality:100/");
     expect(undershoot).toContain("/quality:1/");
+  });
+});
+
+describe("photoVersionSeed", () => {
+  beforeEach(setupEnv);
+  afterEach(tearDownEnv);
+
+  it("returns 0 for null / undefined / empty input", () => {
+    expect(photoVersionSeed(null)).toBe(0);
+    expect(photoVersionSeed(undefined)).toBe(0);
+    expect(photoVersionSeed("")).toBe(0);
+  });
+
+  it("returns floor(ms/1000) for a numeric ms timestamp", () => {
+    expect(photoVersionSeed(1_700_000_123_400)).toBe(1_700_000_123);
+  });
+
+  it("parses an ISO string into seconds since epoch", () => {
+    expect(photoVersionSeed("2026-05-16T10:00:00.000Z")).toBe(Math.floor(Date.parse("2026-05-16T10:00:00.000Z") / 1000));
+  });
+
+  it("accepts a Date instance", () => {
+    const d = new Date("2026-05-16T10:00:00.000Z");
+    expect(photoVersionSeed(d)).toBe(Math.floor(d.getTime() / 1000));
+  });
+
+  it("returns 0 for malformed strings", () => {
+    expect(photoVersionSeed("not-a-date")).toBe(0);
   });
 });

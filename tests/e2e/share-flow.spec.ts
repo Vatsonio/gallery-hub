@@ -16,6 +16,17 @@ test.describe("public share flow", () => {
       page.getByRole("heading", { name: "E2E Demo Album" }),
     ).toBeVisible();
 
+    // In the imgproxy era, every tile <img src> should resolve to the
+    // configured imgproxy origin — or be an imgproxy:// fallback sentinel
+    // if the environment hasn't wired up signing keys. Either way, we
+    // never want to see a /albums/... MinIO key leaking into the DOM.
+    const firstSrc = await page
+      .locator("div.hidden.sm\\:flex img[loading]")
+      .first()
+      .getAttribute("src");
+    expect(firstSrc).toBeTruthy();
+    expect(firstSrc).not.toMatch(/albums\/.+\/(thumb|web|large)\.webp/);
+
     // The page renders both desktop and mobile justified grids in the DOM,
     // with one hidden via CSS. Scope every locator to the desktop variant —
     // identifiable by `.hidden.sm\\:flex` — so counts aren't doubled.
