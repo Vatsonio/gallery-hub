@@ -43,6 +43,18 @@ async function discoverOriginal(albumId: string, photoId: string): Promise<{ ext
  * photo bytes, writes them back to the same key (so the photo id stays
  * stable), then enqueues a derivative regeneration so every variant
  * picks up the change. Body shape is documented in src/lib/photo-edit.ts.
+ *
+ * F13 pentest finding (2026-05-16): we deliberately do NOT cross-check
+ * `photo.album.admin_id === auth.userId` here. The `albums` schema
+ * (migrations/002_albums.sql) has no `admin_id` column — this product is
+ * SINGLE-ADMIN-BY-DESIGN. The single admin owns every album, so the
+ * `requireAdminSession` gate above is sufficient.
+ *
+ * TODO(multi-admin): if a second admin is ever introduced, add an
+ * `admin_id` column to `albums`, then enforce here:
+ *   const album = await getAlbumById(photo.album_id);
+ *   if (album.admin_id !== auth.userId) return 403;
+ * — otherwise this becomes a horizontal-IDOR vector across admins.
  */
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const auth = await requireAdminSession(req);
@@ -50,6 +62,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   if (!isSameOrigin(req)) {
     return NextResponse.json({ error: "forbidden origin" }, { status: 403 });
   }
+  // F13 SAFETY: see header comment — single-admin schema makes the
+  // `requireAdminSession` check above equivalent to an ownership check
+  // until the data model gains `albums.admin_id`.
 
   const { id: photoId } = await ctx.params;
   const rows = await sql<PhotoRow[]>`SELECT * FROM photos WHERE id = ${photoId} LIMIT 1`;
