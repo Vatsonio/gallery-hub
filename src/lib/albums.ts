@@ -5,7 +5,7 @@ import { variantKey, avifVariantKey, originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";
 import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import { s3Client, BUCKET } from "@/lib/minio";
-import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoRow } from "@/lib/types";
+import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoExif, PhotoRow } from "@/lib/types";
 
 function slugify(input: string): string {
   return input
@@ -368,6 +368,11 @@ export async function markPhotoReady(photoId: string, takenAt?: Date | null): Pr
  * Variants are NOT generated server-side anymore: imgproxy resizes on
  * demand from the original. The worker only fills in the bits imgproxy
  * doesn't know (EXIF, thumbhash, sharp-verified dimensions).
+ *
+ * `exif` is the rich EXIF subset emitted by readPhotoExif; pass null
+ * when the parser couldn't recover anything useful (older/scrubbed
+ * files). Stored as JSONB so the album-stats aggregator can index on
+ * `exif->>'camera'`.
  */
 export async function finalizePhotoMetadata(
   photoId: string,
@@ -376,6 +381,7 @@ export async function finalizePhotoMetadata(
     height: number;
     takenAt: Date | null;
     thumbhash: string;
+    exif?: PhotoExif | null;
   },
 ): Promise<void> {
   await sql`
@@ -384,6 +390,7 @@ export async function finalizePhotoMetadata(
            height     = ${meta.height},
            taken_at   = ${meta.takenAt},
            thumbhash  = ${meta.thumbhash},
+           exif       = ${meta.exif ? sql.json({ ...meta.exif }) : null},
            status     = 'ready',
            updated_at = now()
      WHERE id = ${photoId}

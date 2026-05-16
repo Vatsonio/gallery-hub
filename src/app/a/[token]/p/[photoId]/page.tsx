@@ -111,6 +111,10 @@ export default async function PublicPhotoPage({ params }: Props) {
       index={idx}
       total={photos.length}
       initialFavorited={favIds.includes(photo.id)}
+      exif={photo.exif ?? null}
+      dimensions={{ width: photo.width, height: photo.height }}
+      sizeBytes={photo.orig_bytes}
+      filename={photo.filename}
     />
   );
 }

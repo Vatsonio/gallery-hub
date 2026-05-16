@@ -1,7 +1,7 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { s3Client, BUCKET } from "@/lib/minio";
-import { readTakenAt } from "@/lib/images";
+import { readPhotoExif, readTakenAt } from "@/lib/images";
 import { computeThumbhash } from "@/lib/thumbhash";
 import { finalizePhotoMetadata } from "@/lib/albums";
 import type { GenerateDerivativesJobData } from "@/lib/types";
@@ -62,12 +62,16 @@ export async function handleGenerateDerivatives(
   if (!obj.Body) throw new Error(`empty body for ${data.key}`);
   const buf = await bodyToBuffer(obj.Body as { transformToByteArray: () => Promise<Uint8Array> });
 
-  // The three reads operate on the same Buffer and don't share state,
+  // The four reads operate on the same Buffer and don't share state,
   // so kick them off in parallel. Promise.all returns in input order.
-  const [{ width, height }, takenAt, thumbhash] = await Promise.all([
+  // readPhotoExif is exifr-based (same library as readTakenAt) so its
+  // marginal cost is dominated by the JSON serialisation, not the EXIF
+  // parse — both pulls hit the same exifr cache on the buffer.
+  const [{ width, height }, takenAt, thumbhash, exif] = await Promise.all([
     readDimensions(buf),
     readTakenAt(buf),
     computeThumbhash(buf),
+    readPhotoExif(buf),
   ]);
 
   await finalizePhotoMetadata(data.photo_id, {
@@ -75,5 +79,6 @@ export async function handleGenerateDerivatives(
     height,
     takenAt,
     thumbhash,
+    exif,
   });
 }
