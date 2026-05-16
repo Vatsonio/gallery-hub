@@ -40,6 +40,9 @@ afterEach(() => {
   delete process.env.IMGPROXY_BUCKET;
   __resetImgproxyContextForTests();
   vi.restoreAllMocks();
+  // vi.stubGlobal isn't cleared by restoreAllMocks; without this, the
+  // fetch stub leaks into later test files that use global fetch.
+  vi.unstubAllGlobals();
 });
 
 describe("POST /api/admin/albums/[slug]/warm", () => {

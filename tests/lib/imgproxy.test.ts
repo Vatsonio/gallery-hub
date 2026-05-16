@@ -234,6 +234,11 @@ describe("warmImgproxyVariants", () => {
   afterEach(() => {
     tearDownEnv();
     vi.restoreAllMocks();
+    // vi.stubGlobal lives on a separate stack from vi.spyOn — restoreAllMocks
+    // does NOT clean it up. Without this, the `fetch` stub leaks into other
+    // test files and breaks anything that calls global fetch (MinIO S3
+    // client, jobs handlers, etc).
+    vi.unstubAllGlobals();
   });
 
   function mockFetchOk(): { calls: string[]; spy: ReturnType<typeof vi.fn> } {
