@@ -70,6 +70,21 @@ async function resizeWebp(input: Buffer, maxSide: number, quality: number): Prom
     .toBuffer();
 }
 
+/**
+ * AVIF encode effort. Bench numbers on a 4000×3000 noisy JPEG, downscaled
+ * to 1600 (web) and 2400 (large), single sharp.concurrency:
+ *
+ *   effort: 4  →  web 7.06 s / 270 kB,  large 11.37 s / 886 kB
+ *   effort: 2  →  web 0.78 s / 267 kB,  large  1.34 s / 886 kB
+ *
+ * 9× faster at effort=2 with essentially identical output size (<2%
+ * delta). The historical comment in this file claimed effort=4 was a
+ * "5× cost" trade-off vs effort=9 — that's roughly right for the high
+ * end of the curve, but at the low end the cost ratio is ~10× per step.
+ * Capping at effort=2 is the largest single per-photo win in this pass.
+ */
+const AVIF_EFFORT = 2;
+
 async function resizeAvif(input: Buffer, maxSide: number, quality: number): Promise<Buffer> {
   return sharp(input)
     .rotate()
@@ -79,9 +94,7 @@ async function resizeAvif(input: Buffer, maxSide: number, quality: number): Prom
       fit: "inside",
       withoutEnlargement: true,
     })
-    // effort: 4 keeps encode time tolerable; default (4) and 9 differ by
-    // <5% size at a >5× wall-clock cost.
-    .avif({ quality, effort: 4 })
+    .avif({ quality, effort: AVIF_EFFORT })
     .toBuffer();
 }
 
@@ -90,7 +103,7 @@ async function reencodeWebp(input: Buffer, quality: number): Promise<Buffer> {
 }
 
 async function reencodeAvif(input: Buffer, quality: number): Promise<Buffer> {
-  return sharp(input).avif({ quality, effort: 4 }).toBuffer();
+  return sharp(input).avif({ quality, effort: AVIF_EFFORT }).toBuffer();
 }
 
 export async function generateVariants(
