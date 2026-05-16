@@ -89,20 +89,21 @@ export default function PhotoTile({
   }, []);
 
   useEffect(() => {
-    if (!priority) return;
-    progress.register();
+    if (priority) progress.register();
     // Cached-image race: when the browser already has the image in
     // memory/disk cache, the <img> can be `.complete === true` before
     // React attaches the onLoad listener. The onLoad event never fires,
-    // the resolved counter never increments, and the progress bar
-    // freezes below 100%. Detect that on mount and report immediately.
-    // We don't gate on `naturalWidth > 0` because a cached 404 still
-    // counts as resolved (matches the onError path below).
+    // the resolved counter never increments, the opacity transition
+    // never runs, and the tile stays invisible behind the thumbhash.
+    // We flip `loaded` for every tile (priority or not) and additionally
+    // report progress for above-the-fold tiles. We don't gate on
+    // `naturalWidth > 0` because a cached 404 still counts as resolved
+    // (matches the onError path below).
     const el = imgRef.current;
     if (el && el.complete && !reportedRef.current) {
       reportedRef.current = true;
       setLoaded(true);
-      progress.reportLoaded();
+      if (priority) progress.reportLoaded();
     }
     // `register` and `reportLoaded` come from a stable useMemo in the
     // provider — re-running this effect on identity churn would
