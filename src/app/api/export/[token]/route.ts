@@ -20,11 +20,31 @@ import {
 import { createFanOutZip, type ZipEntry } from "@/lib/zipStream";
 import { variantKey } from "@/lib/keys";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
-import { VIEWER_COOKIE } from "@/lib/viewer";
+import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
 import { createRateLimiter } from "@/lib/rateLimiter";
 import { safeCapture } from "@/lib/analytics";
 import { notifyExportStarted, notifyExportCompleted } from "@/lib/notifications";
 import { getAlbumById } from "@/lib/albums";
+
+/**
+ * Machine-readable reason codes returned in the JSON body of any
+ * non-2xx export response. The client uses these to surface
+ * context-aware toast messages without parsing English.
+ */
+export type ExportErrorReason =
+  | "bad_params"
+  | "not_found"
+  | "expired"
+  | "locked"
+  | "download_disabled"
+  | "rate_limited"
+  | "no_favorites"
+  | "empty_album"
+  | "admin_preview_no_favorites";
+
+function errorBody(reason: ExportErrorReason, message: string): string {
+  return JSON.stringify({ reason, message });
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,9 +91,19 @@ export async function GET(
   const url = new URL(req.url);
   const scope = (url.searchParams.get("scope") ?? "all") as ExportScope;
   const variant = (url.searchParams.get("variant") ?? "web") as ExportVariant;
+  // Probe mode: client-side pre-flight. The export modal calls
+  // GET ...?probe=1 before triggering an actual download so a 4xx
+  // surfaces as a toast instead of a navigate-to-error-page. Probe
+  // requests share the same validation pipeline (cheap DB lookups
+  // only) but skip every side effect: no analytics, no notifications,
+  // no cache writes, no zip stream. On success they return 204.
+  const probe = url.searchParams.get("probe") === "1";
 
   if (!["favorites", "all"].includes(scope) || !["original", "web"].includes(variant)) {
-    return new NextResponse("bad params", { status: 400 });
+    return new NextResponse(errorBody("bad_params", "Unsupported export parameters."), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const jar = await cookies();
@@ -81,11 +111,29 @@ export async function GET(
   // Validate share link via the shared status resolver (handles expired/locked).
   const unlocked = jar.get(unlockCookieName(token))?.value ?? null;
   const status = await resolveShareLinkStatus(token, unlocked);
-  if (status.kind === "not_found") return new NextResponse("not found", { status: 404 });
-  if (status.kind === "expired") return new NextResponse("expired", { status: 410 });
-  if (status.kind === "locked") return new NextResponse("locked", { status: 401 });
+  if (status.kind === "not_found") {
+    return new NextResponse(errorBody("not_found", "This share link no longer exists."), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (status.kind === "expired") {
+    return new NextResponse(errorBody("expired", "This share link has expired."), {
+      status: 410,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (status.kind === "locked") {
+    return new NextResponse(errorBody("locked", "Unlock the gallery to export photos."), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   if (!status.link.allow_download) {
-    return new NextResponse("download disabled", { status: 403 });
+    return new NextResponse(
+      errorBody("download_disabled", "Downloads are disabled for this album."),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   // Viewer id (set if missing — page would normally have done this).
@@ -101,11 +149,70 @@ export async function GET(
     });
   }
 
-  if (!exportLimiter.allow(`${token}|${viewerId}`)) {
-    return new NextResponse("rate limited", {
-      status: 429,
-      headers: { "Retry-After": "60" },
+  // Rate-limit only real downloads. A probe ping is meant to be cheap
+  // and quick (it runs every modal open), so subjecting it to the same
+  // bucket would mean clicking the dock twice in 30s could shadow-ban
+  // the legitimate download that follows.
+  if (!probe && !exportLimiter.allow(`${token}|${viewerId}`)) {
+    return new NextResponse(
+      errorBody("rate_limited", "Too many download attempts. Please wait a minute."),
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "60" },
+      },
+    );
+  }
+
+  // Resolve the photo set BEFORE side effects so a probe (and a real
+  // download that turns out to be empty) doesn't fire export_started
+  // events that never complete. The photo lookup is one cheap indexed
+  // query so the reorder costs nothing on the happy path.
+  let photos: PhotoRow[];
+  if (scope === "favorites") {
+    photos = await sql<PhotoRow[]>`
+      SELECT p.id, p.filename, p.sort_order
+        FROM favorites f
+        JOIN photos p ON p.id = f.photo_id
+       WHERE f.share_token = ${token} AND f.viewer_id = ${viewerId}
+       ORDER BY p.sort_order ASC, p.created_at ASC
+    `;
+  } else {
+    photos = await sql<PhotoRow[]>`
+      SELECT id, filename, sort_order FROM photos
+       WHERE album_id = ${status.link.album_id} AND status = 'ready'
+       ORDER BY sort_order ASC, created_at ASC
+    `;
+  }
+  if (photos.length === 0) {
+    // Context-aware reason: admin previews don't have a real viewer
+    // cookie so their favorites set is always empty by construction.
+    // Surface a different message so the admin testing the link knows
+    // to switch to a private window instead of "go like some photos".
+    const isAdminPreview = viewerId === ADMIN_PREVIEW_VIEWER_ID;
+    if (scope === "favorites") {
+      const reason: ExportErrorReason = isAdminPreview
+        ? "admin_preview_no_favorites"
+        : "no_favorites";
+      const message = isAdminPreview
+        ? "Admin previews can't favorite photos. Open the link in a private window to test as a visitor."
+        : "Like some photos first to enable a favorites export.";
+      return new NextResponse(errorBody(reason, message), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new NextResponse(errorBody("empty_album", "There are no photos in this album yet."), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Probe mode: photo set is non-empty and all preconditions passed.
+  // Short-circuit before any side effects — the client now knows the
+  // real download will succeed and will trigger it via a normal
+  // navigation/anchor click.
+  if (probe) {
+    return new NextResponse(null, { status: 204 });
   }
 
   // export_started fires regardless of cache hit/miss so funnels measure
@@ -127,27 +234,6 @@ export async function GET(
       scope,
       variant,
     });
-  }
-
-  // Resolve the photo set.
-  let photos: PhotoRow[];
-  if (scope === "favorites") {
-    photos = await sql<PhotoRow[]>`
-      SELECT p.id, p.filename, p.sort_order
-        FROM favorites f
-        JOIN photos p ON p.id = f.photo_id
-       WHERE f.share_token = ${token} AND f.viewer_id = ${viewerId}
-       ORDER BY p.sort_order ASC, p.created_at ASC
-    `;
-  } else {
-    photos = await sql<PhotoRow[]>`
-      SELECT id, filename, sort_order FROM photos
-       WHERE album_id = ${status.link.album_id} AND status = 'ready'
-       ORDER BY sort_order ASC, created_at ASC
-    `;
-  }
-  if (photos.length === 0) {
-    return new NextResponse("nothing to export", { status: 404 });
   }
 
   const sig = scope === "favorites" ? favoritesSignature(photos.map((p) => p.id)) : "all";
