@@ -108,6 +108,58 @@ services:
       - internal
 
   # ---------------------------------------------------------------------------
+  # imgproxy — on-demand image resizing + format negotiation. Reads originals
+  # straight from gallery-minio over the internal Docker network, caches the
+  # resized output for IMGPROXY_TTL (1y), and signs every URL to prevent
+  # arbitrary-source-fetch abuse. See src/lib/imgproxy.ts for the URL format.
+  #
+  # IMGPROXY_KEY / IMGPROXY_SALT MUST be 32+ hex chars each. Generate with:
+  #   openssl rand -hex 32
+  # ---------------------------------------------------------------------------
+  gallery-imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:latest
+    restart: unless-stopped
+    environment:
+      IMGPROXY_KEY: ${IMGPROXY_KEY}
+      IMGPROXY_SALT: ${IMGPROXY_SALT}
+      # S3 reads — point at the in-cluster MinIO. AWS_* credentials are the
+      # same access key the app uses (read access is sufficient).
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_S3_ENDPOINT: ${IMGPROXY_S3_ENDPOINT:-http://gallery-minio:9000}
+      IMGPROXY_S3_REGION: ${MINIO_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # In dev MinIO is on a loopback-style hostname inside Docker. imgproxy
+      # blocks loopback sources by default for SSRF protection — fine for
+      # prod (separate Cloudflare Tunnel hostname) but needs an opt-in here.
+      IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES: "true"
+      # Format negotiation: WEBP enforced (every browser supports it), AVIF
+      # only when the client signals it via Accept.
+      IMGPROXY_ENFORCE_WEBP: "true"
+      IMGPROXY_ENFORCE_AVIF: "false"
+      IMGPROXY_QUALITY: ${IMGPROXY_QUALITY:-82}
+      # Fastest reasonable AVIF speed (0=best/slow, 9=fastest). 8 keeps
+      # cold-hit latency under ~300ms for typical 1600px web variants.
+      IMGPROXY_AVIF_SPEED: ${IMGPROXY_AVIF_SPEED:-8}
+      # 1-year immutable cache — URL is content-addressed via signature so a
+      # different processing chain produces a different URL anyway.
+      IMGPROXY_TTL: ${IMGPROXY_TTL:-31536000}
+      # Surface ETags so CDN intermediaries can cheaply revalidate.
+      IMGPROXY_USE_ETAG: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      gallery-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
   # Analytics (PostHog self-hosted). Optional — start with:
   #   docker compose up -d posthog-pg posthog-clickhouse posthog-redis posthog
   # First boot: visit http://localhost:8000 and create the admin account.

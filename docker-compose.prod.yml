@@ -219,6 +219,63 @@ services:
       - gallery-internal
 
   # ──────────────────────────────────────────────────────────────────────────
+  # imgproxy — on-demand image resizing + format negotiation. Reads originals
+  # from gallery-minio over the internal network, signs every URL via
+  # HMAC-SHA256 (IMGPROXY_KEY + IMGPROXY_SALT) so arbitrary-source-fetch is
+  # blocked, caches output for IMGPROXY_TTL (1y).
+  #
+  # Cloudflare Tunnel exposes this on https://img.gallery.divass.space — the
+  # browser hits it directly, the app + worker stay internal. See
+  # docs/deploy.md for the tunnel hostname wiring.
+  # ──────────────────────────────────────────────────────────────────────────
+  gallery-imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:v3.27.2
+    container_name: gallery-imgproxy
+    restart: unless-stopped
+    environment:
+      IMGPROXY_KEY: ${IMGPROXY_KEY:?IMGPROXY_KEY is required}
+      IMGPROXY_SALT: ${IMGPROXY_SALT:?IMGPROXY_SALT is required}
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_S3_ENDPOINT: ${IMGPROXY_S3_ENDPOINT:-http://gallery-minio:9000}
+      IMGPROXY_S3_REGION: ${MINIO_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # MinIO is on a service-name hostname inside Docker — counts as a
+      # loopback target from imgproxy's SSRF heuristic. Whitelist it here.
+      IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES: "true"
+      IMGPROXY_ENFORCE_WEBP: "true"
+      IMGPROXY_ENFORCE_AVIF: "false"
+      IMGPROXY_QUALITY: ${IMGPROXY_QUALITY:-82}
+      IMGPROXY_AVIF_SPEED: ${IMGPROXY_AVIF_SPEED:-8}
+      IMGPROXY_TTL: ${IMGPROXY_TTL:-31536000}
+      IMGPROXY_USE_ETAG: "true"
+      # Defence-in-depth: don't honour client-side hints that could be used
+      # to amplify bandwidth (e.g. force-encoding a 100MP AVIF). The size
+      # bounds are already capped in src/lib/imgproxy.ts.
+      IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-50}
+    depends_on:
+      gallery-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    security_opt: *default-security
+    read_only: true
+    tmpfs:
+      - /tmp:size=128M,mode=1777
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: "1.0"
+    networks:
+      - gallery-internal
+
+  # ──────────────────────────────────────────────────────────────────────────
   # PostHog stack — analytics
   # ──────────────────────────────────────────────────────────────────────────
   posthog-pg:
