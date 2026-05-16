@@ -8,6 +8,7 @@ import { verifyPassword } from "@/lib/passwords";
 import { getAdminSession } from "@/lib/session";
 import { createRateLimiter } from "@/lib/rateLimiter";
 import { safeCapture } from "@/lib/analytics";
+import { resolveIpFromHeaders } from "@/lib/client-ip";
 
 type AdminRow = { id: string; email: string; password_hash: string };
 
@@ -37,16 +38,8 @@ function hashIp(ip: string): string {
 }
 
 async function resolveRequestIp(): Promise<string> {
-  // Cloudflare Tunnel adds `cf-connecting-ip`; generic proxies set
-  // `x-forwarded-for` (comma-separated, client first).
   const h = await headers();
-  const cf = h.get("cf-connecting-ip");
-  if (cf) return cf.trim();
-  const xff = h.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]!.trim();
-  const real = h.get("x-real-ip");
-  if (real) return real.trim();
-  return "unknown";
+  return resolveIpFromHeaders(h);
 }
 
 export async function authenticate(email: string, password: string): Promise<AuthResult> {

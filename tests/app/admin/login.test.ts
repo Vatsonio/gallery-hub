@@ -1,7 +1,8 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runMigrations } from "@/../scripts/migrate";
 import { seedAdmin } from "@/../scripts/seed-admin";
 import { authenticate } from "@/app/admin/login/actions";
+import { resolveIpFromHeaders } from "@/lib/client-ip";
 
 const dockerOff = process.env.SKIP_TESTCONTAINERS === "1";
 
@@ -120,4 +121,51 @@ describe("authenticateWithLimits — rate limits", () => {
       expect(emailBlocked.error).toBe(ipBlocked.error);
     }
   }, 15_000);
+});
+
+// F2 regression — proxy header trust is gated on TRUST_PROXY_HEADERS=1. The
+// previous implementation always trusted X-Forwarded-For, so a direct-network
+// attacker could rotate IPs by spoofing the header and bypass the limiter.
+describe("resolveIpFromHeaders — F2 proxy trust gate", () => {
+  function h(map: Record<string, string>): { get: (n: string) => string | null } {
+    return { get: (n) => map[n.toLowerCase()] ?? null };
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("ignores X-Forwarded-For when TRUST_PROXY_HEADERS is unset", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "");
+    const ip = resolveIpFromHeaders(h({ "x-forwarded-for": "10.0.0.1" }));
+    expect(ip).toBe("unknown");
+  });
+
+  it("ignores CF-Connecting-IP when TRUST_PROXY_HEADERS is unset", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "");
+    const ip = resolveIpFromHeaders(h({ "cf-connecting-ip": "1.2.3.4" }));
+    expect(ip).toBe("unknown");
+  });
+
+  it("ignores X-Real-IP when TRUST_PROXY_HEADERS is unset", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "");
+    const ip = resolveIpFromHeaders(h({ "x-real-ip": "5.6.7.8" }));
+    expect(ip).toBe("unknown");
+  });
+
+  it("trusts CF-Connecting-IP first when TRUST_PROXY_HEADERS=1", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "1");
+    const ip = resolveIpFromHeaders(
+      h({ "cf-connecting-ip": "1.2.3.4", "x-forwarded-for": "9.9.9.9" })
+    );
+    expect(ip).toBe("1.2.3.4");
+  });
+
+  it("takes the first XFF hop when TRUST_PROXY_HEADERS=1", () => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "1");
+    const ip = resolveIpFromHeaders(
+      h({ "x-forwarded-for": "10.0.0.1, 172.16.0.5, 192.168.1.1" })
+    );
+    expect(ip).toBe("10.0.0.1");
+  });
 });
