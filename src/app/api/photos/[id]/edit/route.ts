@@ -144,19 +144,26 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     ContentType: orig.contentType,
   }));
 
-  // Update width/height on the row so the grid reflects the new aspect.
+  // Update width/height + bump updated_at on the row so the grid reflects
+  // the new aspect AND the imgproxy URL changes (?v=<unix epoch>) — that
+  // forces clients to refetch through imgproxy, which itself sees a new
+  // source key (different ?v= produces a different cache entry) and
+  // re-resizes from the now-edited original.
   const meta = await sharp(outBuf).metadata();
   if (meta.width && meta.height) {
     await sql`
       UPDATE photos
          SET width = ${meta.width}, height = ${meta.height}, orig_bytes = ${outBuf.length},
-             status = 'processing'
+             status = 'processing', updated_at = now()
        WHERE id = ${photoId}`;
   } else {
-    await sql`UPDATE photos SET orig_bytes = ${outBuf.length}, status = 'processing' WHERE id = ${photoId}`;
+    await sql`UPDATE photos SET orig_bytes = ${outBuf.length}, status = 'processing', updated_at = now() WHERE id = ${photoId}`;
   }
 
-  // Re-enqueue derivatives so the web/large/AVIF mirrors are rebuilt.
+  // Re-enqueue derivatives so the metadata (thumbhash + sharp-verified
+  // width/height + EXIF) refreshes; no variant files get written anymore.
+  // Without this hop the grid keeps the pre-edit thumbhash blur and the
+  // status would never flip back to 'ready'.
   const boss = await getBoss();
   await boss.send(GENERATE_DERIVATIVES_QUEUE, {
     album_id: photo.album_id,
