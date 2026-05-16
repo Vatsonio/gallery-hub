@@ -28,7 +28,12 @@ export default function CoverImage({ src, avifSrc, alt = "", className }: Props)
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
+    // Cover registers on TWO channels: the progress-bar counter (so the
+    // top-of-viewport bar counts it as one of N), and the splash-overlay
+    // cover gate (so PageSplash knows it has to wait for the LCP image
+    // before fading out). Both calls are idempotent.
     progress.register();
+    progress.registerCover();
     // Cached-image race: if the cover was served from preload (rel=preload
     // with as=image in the share page head) it can already be `complete`
     // by the time React attaches onLoad. Without this manual check the
@@ -38,6 +43,7 @@ export default function CoverImage({ src, avifSrc, alt = "", className }: Props)
     if (el && el.complete && !reportedRef.current) {
       reportedRef.current = true;
       progress.reportLoaded();
+      progress.reportCoverLoaded();
     }
     // Stable api — see PhotoTile for the same rationale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -47,6 +53,7 @@ export default function CoverImage({ src, avifSrc, alt = "", className }: Props)
     if (reportedRef.current) return;
     reportedRef.current = true;
     progress.reportLoaded();
+    progress.reportCoverLoaded();
   }
 
   return (

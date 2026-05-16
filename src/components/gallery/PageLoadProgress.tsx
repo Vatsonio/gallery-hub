@@ -41,12 +41,35 @@ import {
 interface Counter {
   registered: number;
   loaded: number;
+  /**
+   * Whether the cover hero has resolved (load or error). The cover is the
+   * single most visually load-bearing asset on the page, so the splash
+   * overlay refuses to dismiss until it lands — even if all other tiles
+   * are ready. Encoded as a flag (not a separate slot in `loaded`) so the
+   * existing progress-bar ratio math is untouched.
+   */
+  coverRegistered: boolean;
+  coverLoaded: boolean;
 }
 
 type Action =
   | { kind: "register" }
   | { kind: "loaded" }
+  | { kind: "registerCover" }
+  | { kind: "loadedCover" }
   | { kind: "reset" };
+
+/**
+ * How many above-the-fold tiles the splash overlay waits for before it
+ * agrees to dismiss. Smaller than `cap` (32) because the user only sees
+ * the first row or two before the splash needs to get out of the way —
+ * blocking on a full 4×8 grid worth of tiles would feel slow on cold
+ * imgproxy. 8 ≈ "one mobile screen" or "the top row + a half on desktop".
+ *
+ * If the page has fewer photos than this, the splash waits for all of
+ * them (via `min(criticalTileTarget, registered)` in the predicate).
+ */
+export const SPLASH_CRITICAL_TILE_TARGET = 8;
 
 /**
  * Pure reducer driving the progress counter. Extracted so the unit test
@@ -68,10 +91,34 @@ export function progressReducer(prev: Counter, action: Action): Counter {
         ...prev,
         loaded: Math.min(prev.registered, prev.loaded + 1),
       };
+    case "registerCover":
+      // Idempotent: a remount during dev hot-reload must not flip the
+      // cover back to "not loaded" if it already resolved.
+      if (prev.coverRegistered) return prev;
+      return { ...prev, coverRegistered: true };
+    case "loadedCover":
+      if (prev.coverLoaded) return prev;
+      return { ...prev, coverLoaded: true };
     case "reset":
-      return { registered: 0, loaded: 0 };
+      return {
+        registered: 0,
+        loaded: 0,
+        coverRegistered: false,
+        coverLoaded: false,
+      };
   }
 }
+
+/**
+ * Initial state for the load-progress reducer. Exported so unit tests
+ * can seed a clean counter without duplicating the literal shape.
+ */
+export const INITIAL_COUNTER: Counter = {
+  registered: 0,
+  loaded: 0,
+  coverRegistered: false,
+  coverLoaded: false,
+};
 
 /**
  * Resolve the fill ratio from the counter. Returns 0..1.
@@ -122,6 +169,71 @@ export function shouldForceComplete(
   return msSinceLastProgress >= thresholdMs;
 }
 
+/**
+ * Pure predicate driving the page-splash dismiss decision. Extracted so
+ * the unit tests can sweep edge cases without spinning up timers + a
+ * renderer (the project convention is to test state machines through
+ * their pure entry points).
+ *
+ * The splash dismisses when ALL of these hold:
+ *
+ *   1. The page is "enabled" — there are photos to gate on. An empty
+ *      album never shows the splash; we report `dismissed=true` so the
+ *      consumer can skip rendering it.
+ *   2. The cover has resolved (load or error). Cover absence is treated
+ *      as "no cover registered" → the caller is expected to NOT call
+ *      `registerCover` in that case, and we then ignore the cover gate.
+ *   3. The first `criticalTileTarget` above-the-fold tiles have resolved
+ *      — or, if the album has fewer than `criticalTileTarget` tiles
+ *      total, all of them.
+ *   4. Minimum-visible-time has elapsed (avoids a 30ms flash on a
+ *      bfcache restore where everything is instantly cached).
+ *   5. OR — hard fallback — the maximum-visible-time has elapsed,
+ *      regardless of cover/tile state. Stops the splash from trapping
+ *      the viewer if imgproxy stalls.
+ *
+ * All time inputs are in ms. `msSinceMount` is the wall-clock since the
+ * provider first rendered.
+ */
+export interface SplashDismissInputs {
+  enabled: boolean;
+  counter: Counter;
+  msSinceMount: number;
+  minVisibleMs: number;
+  hardTimeoutMs: number;
+  criticalTileTarget: number;
+}
+
+export function shouldDismissSplash(inputs: SplashDismissInputs): boolean {
+  const {
+    enabled,
+    counter,
+    msSinceMount,
+    minVisibleMs,
+    hardTimeoutMs,
+    criticalTileTarget,
+  } = inputs;
+  // Empty album / disabled page — there's no splash content to wait for.
+  if (!enabled) return true;
+  // Hard ceiling — never trap the user behind a frozen splash.
+  if (msSinceMount >= hardTimeoutMs) return true;
+  if (msSinceMount < minVisibleMs) return false;
+  // Cover gate: if a cover was registered, it must have loaded.
+  if (counter.coverRegistered && !counter.coverLoaded) return false;
+  // Tile gate: how many above-the-fold tiles must land. If the album
+  // has fewer registered than the target (small album), drop the target
+  // down to "all of them" so we don't wait forever.
+  if (counter.registered === 0) {
+    // No tiles registered yet — wait for at least the cover (handled
+    // above) and the minimum visible time (handled above). If we get
+    // here with `registered === 0` past the min time, we can dismiss
+    // (album with cover only, or page that never registered tiles).
+    return true;
+  }
+  const target = Math.min(criticalTileTarget, counter.registered);
+  return counter.loaded >= target;
+}
+
 export interface PhotoLoadProgressApi {
   /**
    * Mount-time call — bumps the expected total. Pair with one
@@ -131,6 +243,21 @@ export interface PhotoLoadProgressApi {
   register: () => void;
   /** Fired by an image's onLoad or onError to mark its slot resolved. */
   reportLoaded: () => void;
+  /**
+   * Cover hero registers on its own channel so the splash overlay can
+   * gate dismissal on it specifically (not just the aggregate counter,
+   * which would let the splash drop before the LCP image lands).
+   */
+  registerCover: () => void;
+  /** Fired by the cover hero's onLoad or onError. */
+  reportCoverLoaded: () => void;
+  /**
+   * Subscribe to live counter snapshots. The PageSplash component uses
+   * this so it doesn't have to be a child of the provider's render tree
+   * via context value churn — every counter mutation pushes one
+   * synchronous notification with the current state.
+   */
+  subscribe: (listener: (c: Counter) => void) => () => void;
 }
 
 // Default no-op context — lets tiles outside a provider mount safely
@@ -138,6 +265,9 @@ export interface PhotoLoadProgressApi {
 const PhotoLoadContext = createContext<PhotoLoadProgressApi>({
   register: () => {},
   reportLoaded: () => {},
+  registerCover: () => {},
+  reportCoverLoaded: () => {},
+  subscribe: () => () => {},
 });
 
 export function usePhotoLoadProgress(): PhotoLoadProgressApi {
@@ -170,8 +300,18 @@ const STALL_TIMEOUT_MS = 10_000;
  * api via usePhotoLoadProgress().
  */
 export default function PageLoadProgress({ cap, enabled, children }: ProviderProps) {
-  const [counter, dispatch] = useReducer(progressReducer, { registered: 0, loaded: 0 });
+  const [counter, dispatch] = useReducer(progressReducer, INITIAL_COUNTER);
   const registeredRef = useRef(0);
+  const coverRegisteredRef = useRef(false);
+  const coverLoadedRef = useRef(false);
+  // Subscriber list for splash overlay. We push the latest counter
+  // snapshot through useEffect below whenever it changes; subscribers
+  // receive a stable api ref so they can resubscribe across renders.
+  const listenersRef = useRef<Set<(c: Counter) => void>>(new Set());
+
+  useEffect(() => {
+    for (const fn of listenersRef.current) fn(counter);
+  }, [counter]);
   // Once the bar has reached 100% AND faded, we stop rendering. The grace
   // window is the holdDelay (300ms) + fade duration (200ms) ≈ 500ms.
   const [done, setDone] = useState(false);
@@ -187,6 +327,25 @@ export default function PageLoadProgress({ cap, enabled, children }: ProviderPro
 
   const reportLoaded = useCallback(() => {
     dispatch({ kind: "loaded" });
+  }, []);
+
+  const registerCover = useCallback(() => {
+    if (coverRegisteredRef.current) return;
+    coverRegisteredRef.current = true;
+    dispatch({ kind: "registerCover" });
+  }, []);
+
+  const reportCoverLoaded = useCallback(() => {
+    if (coverLoadedRef.current) return;
+    coverLoadedRef.current = true;
+    dispatch({ kind: "loadedCover" });
+  }, []);
+
+  const subscribe = useCallback((fn: (c: Counter) => void) => {
+    listenersRef.current.add(fn);
+    return () => {
+      listenersRef.current.delete(fn);
+    };
   }, []);
 
   // Honest ratio derived from counters. The visible ratio (below) is
@@ -239,8 +398,8 @@ export default function PageLoadProgress({ cap, enabled, children }: ProviderPro
   }, [ratio, counter.registered, enabled]);
 
   const api = useMemo<PhotoLoadProgressApi>(
-    () => ({ register, reportLoaded }),
-    [register, reportLoaded],
+    () => ({ register, reportLoaded, registerCover, reportCoverLoaded, subscribe }),
+    [register, reportLoaded, registerCover, reportCoverLoaded, subscribe],
   );
 
   const showBar = enabled && counter.registered > 0 && !done;

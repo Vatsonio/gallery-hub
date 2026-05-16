@@ -10,6 +10,7 @@ import ExportModal, {
   type ExportOptionId,
 } from "@/components/gallery/ExportModal";
 import PageLoadProgress from "@/components/gallery/PageLoadProgress";
+import PageSplash from "@/components/gallery/PageSplash";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { ExportSizes } from "@/lib/exportSizes";
 
@@ -138,6 +139,16 @@ export default function GalleryShell({
         cap={PROGRESS_CAP}
         enabled={exportSizes.totalCount > 0}
       >
+        {/*
+          Full-page splash overlay. Renders at z-100 above everything,
+          fades out once the cover + first ~8 tiles have landed. Empty
+          albums skip rendering entirely so we don't show a spinner over
+          a "no photos" message. The splash MUST live INSIDE
+          PageLoadProgress (it subscribes via context) and OUTSIDE the
+          children sequence (so it can sit above the cover hero
+          z-order-wise without disrupting layout).
+        */}
+        <PageSplash enabled={exportSizes.totalCount > 0} />
         {isAdminPreview && (
           <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
             Admin preview — favorites and views are not recorded. Open the link in
