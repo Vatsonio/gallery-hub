@@ -13,23 +13,45 @@ import { handleNotificationJob } from "./notifications";
 import { checkStorageQuota } from "@/lib/storage-monitor";
 import type { GenerateDerivativesJobData } from "@/lib/types";
 
+// How many derivative jobs to process concurrently in one worker process.
+// 4–8 is the sweet spot on a 4-core dev box: above ~12 sharp's libvips
+// threads contend with each other and throughput plateaus or regresses.
+// To scale further, run additional worker processes (WORKER_REPLICAS env
+// in deploy/, or just launch `npm run worker` in another shell locally).
+const DEFAULT_WORKER_BATCH_SIZE = 6;
+function resolveBatchSize(): number {
+  const raw = parseInt(process.env.WORKER_BATCH_SIZE ?? "", 10);
+  if (Number.isFinite(raw) && raw > 0) return Math.min(16, raw);
+  return DEFAULT_WORKER_BATCH_SIZE;
+}
+
 async function main(): Promise<void> {
   const boss = await getBoss();
-  console.log("[worker] started, schema=pgboss_gallery");
+  const batchSize = resolveBatchSize();
+  console.log(`[worker] started, schema=pgboss_gallery, derivatives batchSize=${batchSize}`);
 
   await boss.work<GenerateDerivativesJobData>(
     GENERATE_DERIVATIVES_QUEUE,
-    { batchSize: 2 },
+    { batchSize },
     async (jobs) => {
-      for (const job of jobs) {
-        try {
-          await handleGenerateDerivatives(job.data);
-          console.log("[worker] derivatives done", job.data.photo_id);
-        } catch (err) {
-          console.error("[worker] derivatives FAILED", job.id, err);
-          throw err;
-        }
-      }
+      // pg-boss hands us a batch up to `batchSize`. Processing them in
+      // parallel is the whole point of bumping batchSize — sequential
+      // would just be the old `batchSize: 2` behaviour with a larger
+      // window. Failures are captured per-job; we re-throw the first to
+      // let pg-boss requeue the batch, but the others have already run.
+      const results = await Promise.allSettled(
+        jobs.map(async (job) => {
+          try {
+            await handleGenerateDerivatives(job.data);
+            console.log("[worker] derivatives done", job.data.photo_id);
+          } catch (err) {
+            console.error("[worker] derivatives FAILED", job.id, err);
+            throw err;
+          }
+        }),
+      );
+      const firstReject = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (firstReject) throw firstReject.reason;
     },
   );
 

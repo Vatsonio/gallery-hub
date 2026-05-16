@@ -185,7 +185,12 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
       MINIO_FORCE_PATH_STYLE: "true"
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      # How many derivative jobs this worker process runs concurrently. 6
+      # is the dev default (workers/index.ts), see DEFAULT_WORKER_BATCH_SIZE.
+      # Bumping above ~8 starts contending with sharp's libvips threads on
+      # typical 2-vCPU prod boxes — scale horizontally via deploy.replicas
+      # below instead.
+      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-6}
     depends_on:
       gallery-postgres:
         condition: service_healthy

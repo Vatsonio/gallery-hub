@@ -120,9 +120,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM --- Worker (separate window) ---------------------------------------------
-echo [worker] launching derivatives worker in a new window ...
-start "gallery-worker" cmd /k "set DATABASE_URL=%DATABASE_URL%&& set MINIO_ENDPOINT=%MINIO_ENDPOINT%&& set MINIO_ACCESS_KEY=%MINIO_ACCESS_KEY%&& set MINIO_SECRET_KEY=%MINIO_SECRET_KEY%&& set MINIO_BUCKET=%MINIO_BUCKET%&& set MINIO_FORCE_PATH_STYLE=true&& set SESSION_PASSWORD=%SESSION_PASSWORD%&& set NODE_ENV=development&& npm run worker"
+REM --- Worker(s) ----------------------------------------------------------
+REM Each worker process owns a pg-boss `boss.work` subscription with its
+REM own batchSize concurrency. WORKER_REPLICAS controls how many windows
+REM we launch — bumping this is the simplest way to scale derivative
+REM throughput on multi-core boxes (each replica adds another N parallel
+REM sharp encodes, where N = WORKER_BATCH_SIZE).
+REM
+REM Defaults: REPLICAS=1, BATCH_SIZE=6 (see workers/index.ts).
+if not defined WORKER_REPLICAS set WORKER_REPLICAS=1
+if not defined WORKER_BATCH_SIZE set WORKER_BATCH_SIZE=6
+echo [worker] launching %WORKER_REPLICAS% derivatives worker process(es), batchSize=%WORKER_BATCH_SIZE% ...
+for /L %%R in (1,1,%WORKER_REPLICAS%) do (
+  start "gallery-worker-%%R" cmd /k "set DATABASE_URL=%DATABASE_URL%&& set MINIO_ENDPOINT=%MINIO_ENDPOINT%&& set MINIO_ACCESS_KEY=%MINIO_ACCESS_KEY%&& set MINIO_SECRET_KEY=%MINIO_SECRET_KEY%&& set MINIO_BUCKET=%MINIO_BUCKET%&& set MINIO_FORCE_PATH_STYLE=true&& set SESSION_PASSWORD=%SESSION_PASSWORD%&& set WORKER_BATCH_SIZE=%WORKER_BATCH_SIZE%&& set NODE_ENV=development&& npm run worker"
+)
 
 echo.
 echo ============================================================
