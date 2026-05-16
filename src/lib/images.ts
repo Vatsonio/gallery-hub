@@ -1,19 +1,30 @@
 import sharp from "sharp";
 import exifr from "exifr";
 
-export interface Variants {
+export interface PrimaryVariants {
   thumb: Buffer; // 400px max (WEBP only — AVIF encode cost not worth it on tiny tiles)
   web: Buffer;   // 1600px max, WEBP
   large: Buffer; // 2400px max, WEBP
+}
+
+export interface AvifVariants {
   /**
    * AVIF mirror of the web variant. Quality 60 in AVIF is perceptually
    * equivalent to WEBP q82 but roughly half the bytes — at the cost of
-   * a ~2× longer encode.
+   * a longer encode.
    */
   webAvif: Buffer;
   /** AVIF mirror of the large variant. */
   largeAvif: Buffer;
 }
+
+/**
+ * Back-compat alias kept for callers that still want the full set in one
+ * shot. New worker paths should call generatePrimaryVariants + then
+ * generateAvifVariants separately so the photo can flip to status=ready
+ * after the primaries land.
+ */
+export type Variants = PrimaryVariants & AvifVariants;
 
 export const DEFAULT_WATERMARK_TEXT = "(c) gallery.divass.space";
 
@@ -106,41 +117,70 @@ async function reencodeAvif(input: Buffer, quality: number): Promise<Buffer> {
   return sharp(input).avif({ quality, effort: AVIF_EFFORT }).toBuffer();
 }
 
+/**
+ * First-pass derivatives: every WEBP variant the public page needs to
+ * render at status=ready (thumb + web in the grid, large in the lightbox
+ * and cover hero). Cheaper than the full pipeline because we skip AVIF —
+ * which is optional everywhere downstream and ~30% of the encode budget
+ * even after the effort=2 fix in B4.
+ *
+ * Returned WEBPs are already watermarked when `watermark` is set.
+ */
+export async function generatePrimaryVariants(
+  input: Buffer,
+  watermark?: WatermarkOptions | null,
+): Promise<PrimaryVariants> {
+  const [thumb, web, large] = await Promise.all([
+    resizeWebp(input, 400, 75),
+    resizeWebp(input, 1600, 82),
+    resizeWebp(input, 2400, 86),
+  ]);
+  if (!watermark) return { thumb, web, large };
+  const text = (watermark.text ?? "").trim() || DEFAULT_WATERMARK_TEXT;
+  const [webStamped, largeStamped] = await Promise.all([
+    applyWatermark(web, text),
+    applyWatermark(large, text),
+  ]);
+  void reencodeWebp;
+  return { thumb, web: webStamped, large: largeStamped };
+}
+
+/**
+ * Second-pass derivatives: AVIF mirrors of the web and large WEBPs.
+ * Re-encoded from the already-watermarked WEBP outputs when applicable
+ * so both formats render the same overlay. Loss-on-loss is acceptable
+ * here — AVIF compression noise dwarfs the watermark text re-encode
+ * artefacts at q60/q64.
+ */
+export async function generateAvifVariants(
+  primary: PrimaryVariants,
+  watermark?: WatermarkOptions | null,
+): Promise<AvifVariants> {
+  // When unwatermarked we want the highest-fidelity AVIF possible, so
+  // re-encode from the WEBP isn't ideal — but `primary` is what the
+  // worker has buffered after pass 1 and re-streaming the original to
+  // squeeze 2% more quality isn't worth the extra MinIO round-trip.
+  // WEBP→AVIF at q60 is visually indistinguishable from JPEG→AVIF at q60.
+  void watermark;
+  const [webAvif, largeAvif] = await Promise.all([
+    reencodeAvif(primary.web, 60),
+    reencodeAvif(primary.large, 64),
+  ]);
+  return { webAvif, largeAvif };
+}
+
+/**
+ * Convenience wrapper kept for tests and any caller that wants all five
+ * outputs in one shot. New code should prefer the split entrypoints so
+ * the photo can flip to status=ready as soon as the WEBPs land.
+ */
 export async function generateVariants(
   input: Buffer,
   watermark?: WatermarkOptions | null,
 ): Promise<Variants> {
-  const [thumb, web, large, webAvif, largeAvif] = await Promise.all([
-    resizeWebp(input, 400, 75),
-    resizeWebp(input, 1600, 82),
-    resizeWebp(input, 2400, 86),
-    resizeAvif(input, 1600, 60),
-    resizeAvif(input, 2400, 64),
-  ]);
-  if (!watermark) {
-    return { thumb, web, large, webAvif, largeAvif };
-  }
-  // Watermark only the `web` and `large` variants (and their AVIF mirrors).
-  // Thumbs are too small for legible text, and originals stay untouched.
-  const text = (watermark.text ?? "").trim() || DEFAULT_WATERMARK_TEXT;
-  const webStamped = await applyWatermark(web, text);
-  const largeStamped = await applyWatermark(large, text);
-  // Re-encode the AVIF mirrors from the stamped WEBPs so both formats show
-  // the same overlay. AVIF re-encode from WEBP is loss-on-loss but the
-  // overlay is the user-visible signal we care about, not pixel fidelity.
-  const [webAvifStamped, largeAvifStamped] = await Promise.all([
-    reencodeAvif(webStamped, 60),
-    reencodeAvif(largeStamped, 64),
-  ]);
-  // Silence unused warnings; we keep reencodeWebp for future callers.
-  void reencodeWebp;
-  return {
-    thumb,
-    web: webStamped,
-    large: largeStamped,
-    webAvif: webAvifStamped,
-    largeAvif: largeAvifStamped,
-  };
+  const primary = await generatePrimaryVariants(input, watermark);
+  const avif = await generateAvifVariants(primary, watermark);
+  return { ...primary, ...avif };
 }
 
 export async function readTakenAt(input: Buffer): Promise<Date | null> {
