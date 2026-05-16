@@ -200,7 +200,7 @@ export default async function FavoritesPage({ params }: Props) {
                       flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                       initialFavorited={true}
                       index={idx}
-                      priority={idx < 32}
+                      priority={idx < 32 ? "high" : "low"}
                     />
                   );
                 })}
@@ -237,7 +237,7 @@ export default async function FavoritesPage({ params }: Props) {
                       flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                       initialFavorited={true}
                       index={idx}
-                      priority={idx < 32}
+                      priority={idx < 32 ? "high" : "low"}
                     />
                   );
                 })}

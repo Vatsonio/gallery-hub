@@ -40,11 +40,25 @@ interface Props {
   /** Visual size: justified-row tiles use object-cover. */
   className?: string;
   /**
-   * Hint the browser this tile is above-the-fold and should be fetched
-   * eagerly. Applies fetchPriority="high" + decoding="sync" + drops
-   * loading="lazy". Reserve for the first row of the grid.
+   * Loading hint. Maps to the three combinations the gallery actually
+   * uses:
+   *
+   *   - `"high"` — above-the-fold tile. fetchPriority=high, loading=eager,
+   *     decoding=sync. Reserve for the first ~32 tiles.
+   *   - `"low"`  — below-the-fold tile, but still eager: fetchPriority=low,
+   *     loading=eager, decoding=async. The browser starts the request
+   *     immediately, but queues it behind high-priority work. By the time
+   *     the user scrolls, the tile is already painted. Costs no extra
+   *     bandwidth on a viewer who scrolls anyway; the only cost is that
+   *     a viewer who never scrolls below the fold paid for the bytes.
+   *   - `"lazy"` — opt-out for hidden / off-route consumers. Only registers
+   *     with the page-load progress when explicitly above-the-fold.
+   *
+   * Defaults to `"lazy"` so any unaudited callsite keeps the old
+   * memory-friendly behavior. The share-page renderer always passes an
+   * explicit value.
    */
-  priority?: boolean;
+  priority?: "high" | "low" | "lazy";
   /**
    * Pre-decoded ThumbHash PNG (as a data: URL). Rendered behind the
    * real image and faded out via onLoad so users see a blurry preview
@@ -84,9 +98,20 @@ export default function PhotoTile({
   initialFavorited,
   index = 0,
   className,
-  priority = false,
+  priority = "lazy",
   thumbhashDataUrl,
 }: Props) {
+  // Only above-the-fold tiles ("high") count toward the page-splash /
+  // progress bar critical-render set. Below-the-fold tiles ("low") still
+  // download eagerly so they're ready when the user scrolls, but their
+  // load timing must not gate the splash dismiss — we'd be holding the
+  // splash for tiles the user can't see.
+  const isAboveFold = priority === "high";
+  // Browser hints — see the Props.priority docblock for the matrix.
+  const loadingHint = priority === "lazy" ? "lazy" : "eager";
+  const decodingHint = priority === "high" ? "sync" : "async";
+  const fetchPriorityHint =
+    priority === "high" ? "high" : priority === "low" ? "low" : "auto";
   const router = useRouter();
   const [favorited, setFavorited] = useState(initialFavorited);
   const [burst, setBurst] = useState(0);
@@ -109,13 +134,13 @@ export default function PhotoTile({
   }, []);
 
   useEffect(() => {
-    if (priority) progress.register();
+    if (isAboveFold) progress.register();
     // Cached-image race: when the browser already has the image in
     // memory/disk cache, the <img> can be `.complete === true` before
     // React attaches the onLoad listener. The onLoad event never fires,
     // the resolved counter never increments, the opacity transition
     // never runs, and the tile stays invisible behind the thumbhash.
-    // We flip `loaded` for every tile (priority or not) and additionally
+    // We flip `loaded` for every tile (above-fold or not) and additionally
     // report progress for above-the-fold tiles. We don't gate on
     // `naturalWidth > 0` because a cached 404 still counts as resolved
     // (matches the onError path below).
@@ -123,7 +148,7 @@ export default function PhotoTile({
     if (el && el.complete && !reportedRef.current) {
       reportedRef.current = true;
       setLoaded(true);
-      if (priority) progress.reportLoaded();
+      if (isAboveFold) progress.reportLoaded();
     }
     // `register` and `reportLoaded` come from a stable useMemo in the
     // provider — re-running this effect on identity churn would
@@ -139,7 +164,7 @@ export default function PhotoTile({
   // onLoad fires later in the same tick.
   function onImgResolved(): void {
     setLoaded(true);
-    if (!priority) return;
+    if (!isAboveFold) return;
     if (reportedRef.current) return;
     reportedRef.current = true;
     progress.reportLoaded();
@@ -285,9 +310,9 @@ export default function PhotoTile({
           srcSet={srcSet ?? undefined}
           sizes={srcSet ? sizes : undefined}
           alt=""
-          loading={priority ? "eager" : "lazy"}
-          decoding={priority ? "sync" : "async"}
-          fetchPriority={priority ? "high" : "low"}
+          loading={loadingHint}
+          decoding={decodingHint}
+          fetchPriority={fetchPriorityHint}
           draggable={false}
           onLoad={onImgResolved}
           onError={onImgResolved}

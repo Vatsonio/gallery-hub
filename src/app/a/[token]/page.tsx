@@ -322,12 +322,16 @@ export default async function PublicGalleryPage({ params }: Props) {
                             flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                             initialFavorited={favSet.has(item.id)}
                             index={idx}
-                            // W4: only the first 32 tiles get fetchPriority=high
-                            // + loading="eager". Everything below that drops to
-                            // fetchPriority="low" + loading="lazy" so the
-                            // browser saves bandwidth for what the viewer can
-                            // actually see.
-                            priority={idx < 32}
+                            // Wave 19: above-the-fold tiles (first 32) load
+                            // at fetchPriority=high so the cover + first
+                            // screen win the network. Below-the-fold tiles
+                            // still load EAGERLY (not lazy) at
+                            // fetchPriority=low — the browser starts the
+                            // request immediately but queues it behind the
+                            // high-priority work. By the time the viewer
+                            // scrolls, the tile is already on screen
+                            // instead of starting a fresh fetch.
+                            priority={idx < 32 ? "high" : "low"}
                           />
                         );
                       })}
@@ -364,12 +368,16 @@ export default async function PublicGalleryPage({ params }: Props) {
                             flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
                             initialFavorited={favSet.has(item.id)}
                             index={idx}
-                            // W4: only the first 32 tiles get fetchPriority=high
-                            // + loading="eager". Everything below that drops to
-                            // fetchPriority="low" + loading="lazy" so the
-                            // browser saves bandwidth for what the viewer can
-                            // actually see.
-                            priority={idx < 32}
+                            // Wave 19: above-the-fold tiles (first 32) load
+                            // at fetchPriority=high so the cover + first
+                            // screen win the network. Below-the-fold tiles
+                            // still load EAGERLY (not lazy) at
+                            // fetchPriority=low — the browser starts the
+                            // request immediately but queues it behind the
+                            // high-priority work. By the time the viewer
+                            // scrolls, the tile is already on screen
+                            // instead of starting a fresh fetch.
+                            priority={idx < 32 ? "high" : "low"}
                           />
                         );
                       })}
