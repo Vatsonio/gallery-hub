@@ -37,9 +37,23 @@ vi.mock("@/lib/widgetQuery", () => ({
     photos_total: 0,
     storage_bytes: 0,
   })),
+  loadViewsTrend: vi.fn(async () => []),
   loadViewsTrend30d: vi.fn(async () => []),
+  loadTopAlbums: vi.fn(async () => []),
   loadTopAlbums30d: vi.fn(async () => []),
   loadRecentActivity24h: vi.fn(async () => []),
+  loadTileSparklines: vi.fn(async () => ({ photos: [], favorites: [], storage: [] })),
+  parseChikaqPeriod: (raw: string | null | undefined) =>
+    raw === "7d" || raw === "30d" || raw === "90d" || raw === "all" ? raw : "30d",
+  periodToDays: (p: string) => {
+    switch (p) {
+      case "7d": return 7;
+      case "30d": return 30;
+      case "90d": return 90;
+      case "all": return null;
+    }
+    return 30;
+  },
 }));
 
 vi.mock("@/app/admin/logout/actions", () => ({
@@ -49,7 +63,7 @@ vi.mock("@/app/admin/logout/actions", () => ({
 describe("/chikaq", () => {
   it("redirects to /admin/login?next=/chikaq when no admin session", async () => {
     const { default: Page } = await import("@/app/chikaq/page");
-    await expect(Page()).rejects.toThrowError(/REDIRECT:\/admin\/login\?next=\/chikaq/);
+    await expect(Page({})).rejects.toThrowError(/REDIRECT:\/admin\/login\?next=\/chikaq/);
   });
 
   it("does not redirect when the admin session is valid", async () => {
@@ -65,7 +79,7 @@ describe("/chikaq", () => {
     // That's still the wrong-error-for-the-right-reason — what we care about
     // is that the page got *past* the redirect guard. If the redirect had
     // fired, the error would carry the REDIRECT: prefix injected by our mock.
-    await Page().catch((err: unknown) => {
+    await Page({}).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       expect(msg).not.toMatch(/REDIRECT:/);
     });
