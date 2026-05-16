@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dropzone } from "./Dropzone";
 import { PhotoGrid } from "./PhotoGrid";
+import { ProcessingTracker } from "./ProcessingTracker";
 
 interface Props {
   albumId: string;
@@ -15,13 +16,20 @@ interface Props {
  * immediately re-fetches the grid and refreshes the server-rendered
  * album page (stats, share-link summary, etc). Without this wrapper
  * the grid would only reload on the next manual page refresh.
+ *
+ * Also mounts the ProcessingTracker floating card so the user gets a
+ * live worker-progress readout after a finalize. The tracker only
+ * activates when `processingTriggerKey` is bumped — quiescent page
+ * views don't poll.
  */
 export default function AlbumUploadAndGrid({ albumId, slug }: Props) {
   const router = useRouter();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [processingTriggerKey, setProcessingTriggerKey] = useState(0);
 
   function onUploadComplete() {
     setRefreshKey((k) => k + 1);
+    setProcessingTriggerKey((k) => k + 1);
     // router.refresh re-fetches the server component so header stats,
     // photo count, and share-link counters update without a hard reload.
     router.refresh();
@@ -41,6 +49,7 @@ export default function AlbumUploadAndGrid({ albumId, slug }: Props) {
           onPendingResolved={() => router.refresh()}
         />
       </section>
+      <ProcessingTracker slug={slug} triggerKey={processingTriggerKey} />
     </div>
   );
 }
