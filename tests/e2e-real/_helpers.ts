@@ -172,7 +172,13 @@ export async function putObject(
 export async function fetchImage(
   url: string,
   accept: string,
-): Promise<{ status: number; contentType: string; body: Buffer; etag: string | null }> {
+): Promise<{
+  status: number;
+  contentType: string;
+  body: Buffer;
+  etag: string | null;
+  cacheControl: string | null;
+}> {
   const res = await fetch(url, {
     headers: { Accept: accept },
     // Buffer the whole response; tests inspect bytes.
@@ -183,6 +189,7 @@ export async function fetchImage(
     contentType: res.headers.get("content-type") ?? "",
     body,
     etag: res.headers.get("etag"),
+    cacheControl: res.headers.get("cache-control"),
   };
 }
 

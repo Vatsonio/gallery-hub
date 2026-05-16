@@ -167,6 +167,25 @@ describe.skipIf(dockerOff)("e2e — imgproxy + MinIO real bytes", () => {
     expect(res.body[1]).toBe(0xd8);
   }, 60_000);
 
+  it("emits a 1-year Cache-Control max-age (W7 — repeat-visit revalidation)", async () => {
+    // W7 asks us to lock in the imgproxy cache headers so a returning
+    // viewer hits browser cache and never revalidates. imgproxy honours
+    // IMGPROXY_TTL=31536000 (set in compose) and emits a matching
+    // `Cache-Control: public, max-age=31536000` on every 200 response,
+    // along with an ETag so a CDN intermediary can cheaply check freshness
+    // when forced. URLs are content-addressed via the HMAC signature, so
+    // mutating the photo produces a new URL and the old cache entry simply
+    // ages out — we don't need the `immutable` directive specifically.
+    const url = buildImgproxyUrl(sampleKey, { width: 800, format: "jpg" });
+    const res = await fetchImage(url, "image/jpeg");
+    expect(res.status).toBe(200);
+    expect(res.cacheControl).toBeTruthy();
+    const cc = (res.cacheControl ?? "").toLowerCase();
+    expect(cc).toContain("max-age=31536000");
+    expect(cc).toContain("public");
+    expect(res.etag).toBeTruthy();
+  }, 60_000);
+
   it("watermarked URL signature roundtrips through imgproxy (URL parser accepts it)", async () => {
     // Deviation from the original spec: we don't drive a real wm_url
     // composition end-to-end because imgproxy v3 rejects s3:// URLs in
