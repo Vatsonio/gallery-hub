@@ -179,6 +179,43 @@ async function pollProcessing(albumId: string, expected: number, timeoutSec: num
   throw new Error(`processing timed out after ${timeoutSec}s waiting for ${expected} photos`);
 }
 
+/**
+ * Measure the imgproxy-cold and imgproxy-warm latency for a single
+ * representative variant URL. "Cold" is the first hit (imgproxy fetches the
+ * original from MinIO + resizes + encodes); "warm" is the same URL again
+ * (served from imgproxy's local cache, byte-identical response).
+ *
+ * Skips silently when PUBLIC_IMGPROXY_URL isn't wired — keeps the bench
+ * runnable on a stack that hasn't migrated yet.
+ */
+async function imgproxyLatencyProbe(albumId: string, photoId: string, filename: string): Promise<{ coldMs: number; warmMs: number } | null> {
+  const base = process.env.PUBLIC_IMGPROXY_URL ?? process.env.IMGPROXY_URL;
+  if (!base || !process.env.IMGPROXY_KEY || !process.env.IMGPROXY_SALT) return null;
+  const { imgproxyWeb } = await import("../src/lib/imgproxy.js").catch(async () => {
+    // tsx resolves the .ts source — fall back when .js isn't found.
+    return await import("../src/lib/imgproxy");
+  }) as typeof import("../src/lib/imgproxy");
+  const { resolveOriginalExt } = await import("../src/lib/photoExt");
+  const { originalKey } = await import("../src/lib/keys");
+  const key = originalKey(albumId, photoId, resolveOriginalExt(filename));
+  const url = imgproxyWeb(key);
+
+  const cold = nowMs();
+  const r1 = await fetch(url, { headers: { accept: "image/avif,image/webp,image/*" } });
+  if (!r1.ok) throw new Error(`imgproxy probe failed: ${r1.status}`);
+  // Drain so cold timing covers full response, not just headers.
+  await r1.arrayBuffer();
+  const coldMs = nowMs() - cold;
+
+  const warm = nowMs();
+  const r2 = await fetch(url, { headers: { accept: "image/avif,image/webp,image/*" } });
+  if (!r2.ok) throw new Error(`imgproxy warm probe failed: ${r2.status}`);
+  await r2.arrayBuffer();
+  const warmMs = nowMs() - warm;
+
+  return { coldMs, warmMs };
+}
+
 function buildRequest(path: string, body: unknown): Request {
   return new Request(`http://localhost:3000${path}`, {
     method: "POST",
@@ -269,6 +306,18 @@ async function main(): Promise<void> {
   // ---- 5. process --------------------------------------------------------
   const processMs = await pollProcessing(album.id, args.count, args.timeoutSec);
 
+  // ---- 6. imgproxy first-render probe -----------------------------------
+  // Cold = imgproxy's first fetch of the original + resize + encode.
+  // Warm = same URL re-requested (hits imgproxy's in-memory cache).
+  // Skips silently when imgproxy isn't wired up (pre-migration baseline).
+  let imgproxy: { coldMs: number; warmMs: number } | null = null;
+  try {
+    const firstPhoto = presignBody.files[0];
+    imgproxy = await imgproxyLatencyProbe(album.id, presignJson.items[0].photo_id, firstPhoto.filename);
+  } catch (err) {
+    console.warn("[bench] imgproxy probe skipped:", (err as Error).message);
+  }
+
   // ---- output ------------------------------------------------------------
   const totalMs = presignMs + putMs + finalizeMs + processMs;
   const sizeMB = (sample.length / 1024 / 1024).toFixed(2);
@@ -284,6 +333,12 @@ async function main(): Promise<void> {
   console.log(`| process  | ${fmt(processMs).padStart(9)} | ${fmt(processMs / args.count).padStart(9)} |`);
   console.log(`| **total**| **${fmt(totalMs)}** | **${fmt(totalMs / args.count)}** |`);
   console.log("");
+  if (imgproxy) {
+    console.log(`| imgproxy | cold | warm |`);
+    console.log(`|----------|-----:|-----:|`);
+    console.log(`| 1600px   | ${fmt(imgproxy.coldMs)} | ${fmt(imgproxy.warmMs)} |`);
+    console.log("");
+  }
   console.log(`[bench] label=${args.label} count=${args.count} per-file=${sizeMB} MB throughput=${throughputMBs.toFixed(2)} MB/s`);
 }
 

@@ -67,19 +67,41 @@ tags, healthchecks, read-only root FS, resource limits, no host port
 bindings, Cloudflare Tunnel as the only ingress). `docker-compose.yml`
 stays as the dev-only stack with exposed ports and `:latest` tags.
 
-### Two public hostnames
+### Public hostnames
 
 The browser does direct PUT uploads to MinIO using presigned URLs to
 avoid streaming through Next.js (which would double bandwidth and
-bottleneck on 50 MB photos). That means MinIO needs its own public
-hostname:
+bottleneck on 50 MB photos). Image rendering is similarly direct —
+imgproxy resizes on demand from the MinIO original and serves the
+result back to the browser. Both need their own public hostnames:
 
 - `gallery.divass.space` → `gallery-app:3000`
-- `minio.gallery.divass.space` → `gallery-minio:9000`
+- `minio.gallery.divass.space` → `gallery-minio:9000` (presigned PUT/GET)
+- `img.gallery.divass.space` → `gallery-imgproxy:8080` (on-demand resize)
 - `posthog.gallery.divass.space` → `posthog:8000` (analytics)
 
 Inside Docker, the app uses `gallery-minio:9000` for server-side
-reads/writes; the browser uses the public hostname for presigned PUT/GET.
+reads/writes; the browser uses the public hostnames for presigned
+PUT/GET (uploads, exports) and signed imgproxy URLs (gallery rendering).
+
+### On-demand image pipeline (imgproxy)
+
+Replaced the previous 5-variant pre-encode worker. Every gallery
+image, admin thumbnail, and cover hero is a signed imgproxy URL
+fronting the same `albums/{albumId}/{photoId}/original.{ext}` key
+in MinIO. Imgproxy negotiates output format from the browser Accept
+header (AVIF → WEBP → JPEG fallback) and caches the resized output
+for one year.
+
+- URL builder: [`src/lib/imgproxy.ts`](src/lib/imgproxy.ts) with
+  HMAC-SHA256 signing, base64url encoding, `version` cache-bust
+  driven off `photos.updated_at`.
+- Cheatsheet: [`docs/imgproxy-cheatsheet.md`](docs/imgproxy-cheatsheet.md)
+- Perf + rollback: [`docs/perf/2026-05-16-imgproxy-migration.md`](docs/perf/2026-05-16-imgproxy-migration.md)
+
+The worker is now metadata-only (dimensions, EXIF `taken_at`,
+thumbhash, status flip). Photo `status='ready'` lands ~100 ms after
+finalize instead of ~5–15 s.
 
 ## Health check
 
