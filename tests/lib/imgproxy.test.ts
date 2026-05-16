@@ -115,11 +115,14 @@ describe("imgproxy URL builder", () => {
     expect(decodeSource(encoded)).toBe(`s3://${TEST_BUCKET}/watermarks/album123.png`);
   });
 
-  it("appends a cache-bust ?v= to the source URI when `version` is set", () => {
+  it("emits cachebuster:N in the processing chain and keeps the S3 source clean", () => {
     const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, version: 1700000000 });
+    expect(url).toContain("/cachebuster:1700000000/");
     const segments = url.split("/").filter(Boolean);
     const encodedSource = segments[segments.length - 1];
-    expect(decodeSource(encodedSource)).toBe(`s3://${TEST_BUCKET}/albums/a/p/original.jpg?v=1700000000`);
+    // Source URI must NOT include a query string — MinIO rejects unknown
+    // params as InvalidArgument: Invalid version id specified.
+    expect(decodeSource(encodedSource)).toBe(`s3://${TEST_BUCKET}/albums/a/p/original.jpg`);
   });
 
   it("different version values produce different signatures", () => {

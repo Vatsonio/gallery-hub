@@ -69,10 +69,12 @@ export interface ImgproxyOptions {
    */
   gravity?: "sm" | "ce" | "no" | "so" | "ea" | "we";
   /**
-   * Optional cache-buster (typically `photos.updated_at` unix ts). Appended
-   * to the source URL as `?v=N` so re-edits invalidate downstream caches.
-   * Imgproxy bakes the source URL into its cache key, so a different `v`
-   * forces a fresh fetch from MinIO without a manual PURGE.
+   * Optional cache-buster (typically `photos.updated_at` unix ts). Forwarded
+   * to imgproxy as a `cachebuster:N` processing option — imgproxy bakes it
+   * into its cache key but does NOT forward it to the S3 source. This is
+   * critical: MinIO rejects unknown query params on GetObject as
+   * "Invalid version id specified" so we cannot append `?v=N` to the s3://
+   * source URL.
    */
   version?: number | string;
   /**
@@ -161,6 +163,11 @@ function buildProcessingOptions(opts: ImgproxyOptions): string {
     parts.push(`quality:${q}`);
   }
   if (opts.gravity) parts.push(`gravity:${opts.gravity}`);
+  // Cache-buster goes in the processing chain (not the S3 source URL), so
+  // imgproxy varies its cache key without polluting the upstream GET.
+  if (opts.version !== undefined && opts.version !== null && `${opts.version}` !== "") {
+    parts.push(`cachebuster:${encodeURIComponent(String(opts.version))}`);
+  }
   if (opts.watermark) {
     // Subtle bottom-right stamp with 6% opacity, 20px inset, 25% scale —
     // matches the in-process sharp overlay this replaces.
@@ -203,10 +210,10 @@ export function buildImgproxyUrl(s3Key: string, opts: ImgproxyOptions = {}): str
     return `imgproxy://${s3Key}`;
   }
 
-  let sourceUri = `s3://${ctx.bucket}/${s3Key}`;
-  if (opts.version !== undefined && opts.version !== null && `${opts.version}` !== "") {
-    sourceUri += `?v=${encodeURIComponent(String(opts.version))}`;
-  }
+  // S3 source URL must NOT carry any query string — MinIO interprets unknown
+  // params as `versionId` and rejects with InvalidArgument. Cache-bust lives
+  // in the processing chain via cachebuster:N inside buildProcessingOptions.
+  const sourceUri = `s3://${ctx.bucket}/${s3Key}`;
   const encodedSource = base64urlString(sourceUri);
   const processing = buildProcessingOptions(opts);
   const ext = extensionFor(opts.format);
