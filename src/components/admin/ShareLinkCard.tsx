@@ -5,6 +5,7 @@ import { Copy, QrCode, Settings, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ShareLinkSettingsDialog } from "./ShareLinkSettingsDialog";
 import { ShareLinkQrDialog } from "./ShareLinkQrDialog";
+import { useToast } from "@/components/ui/Toast";
 
 export interface ShareLinkCardProps {
   publicBaseUrl: string;
@@ -30,6 +31,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 export function ShareLinkCard({ publicBaseUrl, link, onCreate }: ShareLinkCardProps) {
+  const toast = useToast();
   const [copied, setCopied] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -53,9 +55,14 @@ export function ShareLinkCard({ publicBaseUrl, link, onCreate }: ShareLinkCardPr
 
   const url = `${publicBaseUrl}/a/${link.token}`;
   const copy = async () => {
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success("Link copied to clipboard");
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy link");
+    }
   };
 
   return (

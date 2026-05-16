@@ -118,13 +118,34 @@ body {
   contain-intrinsic-size: var(--row-h, 240px) auto;
 }
 
+/* Toast entry — slide in from the trailing edge with a soft fade. Direction
+ * is keyed by the breakpoint: desktop slides from the right, mobile from
+ * the top, matching the container's positioning. */
+@keyframes toast-slide-in-right {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes toast-slide-in-top {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.toast-anim {
+  animation: toast-slide-in-top 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (min-width: 640px) {
+  .toast-anim {
+    animation: toast-slide-in-right 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .heart-burst-anim,
   .glass-dock-anim,
   .photo-tile,
   .lightbox-anim,
   .cover-kenburns,
-  .heart-pulse-anim {
+  .heart-pulse-anim,
+  .toast-anim {
     animation: none !important;
   }
 }

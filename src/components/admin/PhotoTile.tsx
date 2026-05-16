@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { setCoverAction, deletePhotoAction } from "@/app/admin/albums/actions";
 import { createLongPress } from "@/lib/long-press";
+import { useToast } from "@/components/ui/Toast";
 import { useMemo } from "react";
 
 export interface PhotoTileData {
@@ -50,6 +51,7 @@ export function PhotoTile({
   onEdit,
   onPickCover,
 }: Props) {
+  const toast = useToast();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: photo.id,
     disabled: selectionMode, // never start a drag while selecting
@@ -152,7 +154,15 @@ export function PhotoTile({
               )}
               <DropdownMenuItem
                 className="cursor-pointer"
-                onClick={async () => { await setCoverAction(photo.albumId, photo.id); onChange(); }}
+                onClick={async () => {
+                  try {
+                    await setCoverAction(photo.albumId, photo.id);
+                    toast.success("Cover updated");
+                    onChange();
+                  } catch {
+                    toast.error("Could not update cover");
+                  }
+                }}
               >
                 <Star className="mr-2 h-3 w-3" aria-hidden /> Set as cover
               </DropdownMenuItem>
@@ -164,7 +174,14 @@ export function PhotoTile({
               <DropdownMenuItem
                 className="cursor-pointer text-rose-300"
                 onClick={async () => {
-                  if (confirm("Delete this photo?")) { await deletePhotoAction(photo.id); onChange(); }
+                  if (!confirm("Delete this photo?")) return;
+                  try {
+                    await deletePhotoAction(photo.id);
+                    toast.success("Photo deleted");
+                    onChange();
+                  } catch {
+                    toast.error("Delete failed");
+                  }
                 }}
               >
                 <Trash2 className="mr-2 h-3 w-3" aria-hidden /> Delete

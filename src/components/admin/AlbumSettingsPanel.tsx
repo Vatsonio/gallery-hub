@@ -11,6 +11,7 @@ import {
   updateAlbumWatermarkAction,
   regenerateAlbumDerivativesAction,
 } from "@/app/admin/albums/actions";
+import { useToast } from "@/components/ui/Toast";
 import type { AlbumRow } from "@/lib/types";
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
 
 export function AlbumSettingsPanel({ album }: Props) {
   const router = useRouter();
+  const toast = useToast();
   const [coverOpen, setCoverOpen] = useState(false);
   const [wmEnabled, setWmEnabled] = useState<boolean>(album.watermark_enabled ?? false);
   const [wmText, setWmText] = useState<string>(album.watermark_text ?? "");
@@ -33,13 +35,25 @@ export function AlbumSettingsPanel({ album }: Props) {
   function saveWatermark() {
     setErr(null);
     setMsg(null);
+    const prevEnabled = album.watermark_enabled ?? false;
     start(async () => {
       try {
         await updateAlbumWatermarkAction(album.id, wmEnabled, wmText.trim() || null);
         setMsg("Watermark settings saved");
+        // Distinguish "turned on" / "turned off" / "saved" so the toast reads
+        // naturally and the user knows the regeneration is implicit.
+        if (wmEnabled && !prevEnabled) {
+          toast.warning("Watermark enabled — regenerating…");
+        } else if (!wmEnabled && prevEnabled) {
+          toast.success("Watermark disabled — regenerating…");
+        } else {
+          toast.success("Settings saved");
+        }
         router.refresh();
       } catch (e) {
-        setErr((e as Error).message);
+        const message = (e as Error).message;
+        setErr(message);
+        toast.error(`Save failed: ${message}`);
       }
     });
   }
@@ -52,8 +66,11 @@ export function AlbumSettingsPanel({ album }: Props) {
       try {
         const r = await regenerateAlbumDerivativesAction(album.id);
         setMsg(`Queued ${r.enqueued} photo${r.enqueued === 1 ? "" : "s"} for regeneration`);
+        toast.success(`Queued ${r.enqueued} ${r.enqueued === 1 ? "photo" : "photos"}`);
       } catch (e) {
-        setErr((e as Error).message);
+        const message = (e as Error).message;
+        setErr(message);
+        toast.error(`Regenerate failed: ${message}`);
       }
     });
   }

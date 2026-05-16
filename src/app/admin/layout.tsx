@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Activity, Bell, Heart, Images, LogOut } from "lucide-react";
 import { logoutAction } from "./logout/actions";
 import { getAdminSession } from "@/lib/session";
+import { ToastProvider } from "@/components/ui/Toast";
 
 const NAV = [
   {
@@ -66,7 +67,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </button>
         </form>
       </aside>
-      <main className="flex-1 min-w-0">{children}</main>
+      <main className="flex-1 min-w-0">
+        <ToastProvider>{children}</ToastProvider>
+      </main>
     </div>
   );
 }
