@@ -7,6 +7,7 @@ import { originalKey } from "@/lib/keys";
 import { sql } from "@/lib/db";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { validatePhotoEditPayload, brightnessToModulate, PhotoEditValidationError } from "@/lib/photo-edit";
+import { isSameOrigin } from "@/lib/same-origin";
 import type { PhotoRow } from "@/lib/types";
 
 interface Ctx { params: Promise<{ id: string }>; }
@@ -46,6 +47,9 @@ async function discoverOriginal(albumId: string, photoId: string): Promise<{ ext
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const auth = await requireAdminSession(req);
   if (!auth.ok) return new NextResponse(null, { status: 401 });
+  if (!isSameOrigin(req)) {
+    return NextResponse.json({ error: "forbidden origin" }, { status: 403 });
+  }
 
   const { id: photoId } = await ctx.params;
   const rows = await sql<PhotoRow[]>`SELECT * FROM photos WHERE id = ${photoId} LIMIT 1`;

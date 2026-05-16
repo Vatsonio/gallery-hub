@@ -4,6 +4,7 @@ import { requireAdminSession } from "@/lib/session";
 import { getAlbumById } from "@/lib/albums";
 import { presignPut } from "@/lib/presign";
 import { originalKey, extFromContentType } from "@/lib/keys";
+import { isSameOrigin } from "@/lib/same-origin";
 import type { PresignRequestBody, PresignResponse } from "@/lib/types";
 
 // Wedding shoots routinely exceed 200 files. Cap chosen to be high
@@ -16,6 +17,9 @@ const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
 export async function POST(req: Request): Promise<Response> {
   const auth = await requireAdminSession(req);
   if (!auth.ok) return new NextResponse(null, { status: 401 });
+  if (!isSameOrigin(req)) {
+    return NextResponse.json({ error: "forbidden origin" }, { status: 403 });
+  }
 
   let body: PresignRequestBody;
   try {

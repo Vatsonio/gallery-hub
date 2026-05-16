@@ -3,6 +3,7 @@ import { requireAdminSession } from "@/lib/session";
 import { getAlbumById, insertPhoto } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
+import { isSameOrigin } from "@/lib/same-origin";
 import { notifyNewUpload } from "@/lib/notifications";
 import type { FinalizeRequestBody, FinalizeResponse, GenerateDerivativesJobData } from "@/lib/types";
 
@@ -15,6 +16,9 @@ function inferExt(filename: string): string {
 export async function POST(req: Request): Promise<Response> {
   const auth = await requireAdminSession(req);
   if (!auth.ok) return new NextResponse(null, { status: 401 });
+  if (!isSameOrigin(req)) {
+    return NextResponse.json({ error: "forbidden origin" }, { status: 403 });
+  }
 
   let body: FinalizeRequestBody;
   try {
