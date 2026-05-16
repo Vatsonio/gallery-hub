@@ -1,11 +1,26 @@
 import archiver from "archiver";
 import { PassThrough, type Readable } from "node:stream";
+import { sanitizeFilename } from "@/lib/sanitize";
 
 export interface ZipEntry {
   /** Filename inside the ZIP, e.g. "001-IMG_0001.jpg". */
   name: string;
   /** Source stream — typically a MinIO GetObject body. */
   body: Readable | Buffer;
+}
+
+/**
+ * Defense-in-depth: re-sanitize every ZIP entry name at the archive boundary,
+ * even though callers already sanitize at the upload site (F7). A buggy or
+ * legacy DB row with `../etc/passwd` in `filename` must not produce a slip-
+ * vulnerable archive. We additionally guarantee the name has no path
+ * separator (archivers happily emit nested paths if you ask them to).
+ */
+function safeEntryName(raw: string): string {
+  // sanitizeFilename strips `/`, `\`, control chars, leading dots, and NFC-
+  // normalizes. Whatever the caller passed (even a prefixed `001-`), we feed
+  // the whole string through and trust the output as a single flat name.
+  return sanitizeFilename(raw);
 }
 
 export interface FanOutZipHandles {
@@ -54,7 +69,7 @@ export function createFanOutZip(entries: AsyncIterable<ZipEntry>): FanOutZipHand
   const done = (async () => {
     try {
       for await (const e of entries) {
-        archive.append(e.body, { name: e.name });
+        archive.append(e.body, { name: safeEntryName(e.name) });
       }
       await archive.finalize();
     } catch (err) {

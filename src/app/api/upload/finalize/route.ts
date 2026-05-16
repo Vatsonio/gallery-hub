@@ -4,6 +4,7 @@ import { getAlbumById, insertPhoto } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
+import { sanitizeFilename } from "@/lib/sanitize";
 import { notifyNewUpload } from "@/lib/notifications";
 import type { FinalizeRequestBody, FinalizeResponse, GenerateDerivativesJobData } from "@/lib/types";
 
@@ -37,16 +38,21 @@ export async function POST(req: Request): Promise<Response> {
   const boss = await getBoss();
   let inserted = 0;
   for (const p of body.photos) {
+    // F7: client-supplied filename is normalized + stripped of path
+    // separators, control chars, leading dots, etc. before it lands in
+    // the DB. Downstream consumers (ZIP entry names, Content-Disposition,
+    // Telegram notifications) all read from the sanitized DB value.
+    const safeFilename = sanitizeFilename(p.filename);
     await insertPhoto({
       id: p.photo_id,
       album_id: album.id,
-      filename: p.filename,
+      filename: safeFilename,
       width: p.width,
       height: p.height,
       orig_bytes: p.size,
       taken_at: null,
     });
-    const ext = inferExt(p.filename);
+    const ext = inferExt(safeFilename);
     const job: GenerateDerivativesJobData = {
       album_id: album.id,
       photo_id: p.photo_id,
