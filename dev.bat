@@ -115,6 +115,9 @@ if errorlevel 1 (
     -e IMGPROXY_ENFORCE_AVIF=false ^
     -e IMGPROXY_QUALITY=82 ^
     -e IMGPROXY_AVIF_SPEED=8 ^
+    -e IMGPROXY_JPEG_PROGRESSIVE=true ^
+    -e IMGPROXY_PNG_INTERLACED=true ^
+    -e IMGPROXY_CONCURRENCY=10 ^
     -e IMGPROXY_TTL=31536000 ^
     -e IMGPROXY_USE_ETAG=true ^
     --add-host=host.docker.internal:host-gateway ^

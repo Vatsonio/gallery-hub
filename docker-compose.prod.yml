@@ -247,6 +247,15 @@ services:
       IMGPROXY_ENFORCE_AVIF: "false"
       IMGPROXY_QUALITY: ${IMGPROXY_QUALITY:-82}
       IMGPROXY_AVIF_SPEED: ${IMGPROXY_AVIF_SPEED:-8}
+      # Progressive JPEG + interlaced PNG — browser paints a low-res pass
+      # before the final bytes land. Costs ~5% extra JPEG bytes; the
+      # feel-faster win on slow networks is worth it.
+      IMGPROXY_JPEG_PROGRESSIVE: ${IMGPROXY_JPEG_PROGRESSIVE:-true}
+      IMGPROXY_PNG_INTERLACED: ${IMGPROXY_PNG_INTERLACED:-true}
+      # 10 parallel encodes (default 4). On a 2-vCPU VPS this is fine —
+      # libvips uses ~1.5 cores per encode, so 10 simultaneous requests
+      # interleave nicely. Lower this if you observe sustained 100% CPU.
+      IMGPROXY_CONCURRENCY: ${IMGPROXY_CONCURRENCY:-10}
       IMGPROXY_TTL: ${IMGPROXY_TTL:-31536000}
       IMGPROXY_USE_ETAG: "true"
       # Defence-in-depth: don't honour client-side hints that could be used

@@ -141,6 +141,16 @@ services:
       # Fastest reasonable AVIF speed (0=best/slow, 9=fastest). 8 keeps
       # cold-hit latency under ~300ms for typical 1600px web variants.
       IMGPROXY_AVIF_SPEED: ${IMGPROXY_AVIF_SPEED:-8}
+      # Progressive JPEG + interlaced PNG: the browser paints a low-res
+      # pass before the final bytes arrive, so the gallery *feels* faster
+      # even when total transfer time is unchanged. Negligible CPU cost
+      # at encode time, ~5% extra bytes on JPEG vs sequential.
+      IMGPROXY_JPEG_PROGRESSIVE: ${IMGPROXY_JPEG_PROGRESSIVE:-true}
+      IMGPROXY_PNG_INTERLACED: ${IMGPROXY_PNG_INTERLACED:-true}
+      # Default is 4 concurrent encodes; raising to 10 lets a 150-photo
+      # cold-cache fan-out drain faster. imgproxy queues anything above
+      # this on its internal semaphore, so we never overload libvips.
+      IMGPROXY_CONCURRENCY: ${IMGPROXY_CONCURRENCY:-10}
       # 1-year immutable cache — URL is content-addressed via signature so a
       # different processing chain produces a different URL anyway.
       IMGPROXY_TTL: ${IMGPROXY_TTL:-31536000}
