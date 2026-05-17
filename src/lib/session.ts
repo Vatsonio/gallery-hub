@@ -48,6 +48,13 @@ function resolveSessionPassword(): string {
     }
     return fromEnv;
   }
+  // Next.js collects per-route module data during `next build` even when no
+  // env file is present (GitHub Actions, Docker build stage). Return a
+  // build-time placeholder so the route module can finish initialising —
+  // production runtime never sees this because the env var is set there.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return "build-time-placeholder-thirty-two-chars-min-do-not-use";
+  }
   if (process.env.NODE_ENV === "production") {
     throw new Error(
       "SESSION_PASSWORD env var is required in production. " +

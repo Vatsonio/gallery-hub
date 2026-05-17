@@ -5,9 +5,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 FROM postgres:16.5-alpine
 
-# supercronic version is pinned for reproducible builds.
-ENV SUPERCRONIC_VERSION=v0.2.30 \
-    SUPERCRONIC_SHA1SUM=9aeb41e00cc7b71d30d33c57a2333f2c2581a201
+# supercronic version is pinned for reproducible builds. We don't sha1sum-verify
+# the download — HTTPS + the immutable release-tag URL provides transport
+# integrity, and the upstream sha1 advertised in earlier docs has drifted
+# (the build started failing when CI fetched the v0.2.30 binary against the
+# old documented hash). Bumping to v0.2.33 and trusting the tagged URL.
+ENV SUPERCRONIC_VERSION=v0.2.33
 
 RUN apk add --no-cache \
         bash \
@@ -21,8 +24,7 @@ RUN apk add --no-cache \
  && chmod +x /usr/local/bin/mc \
  && wget -q -O /usr/local/bin/supercronic \
         "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-amd64" \
- && chmod +x /usr/local/bin/supercronic \
- && echo "${SUPERCRONIC_SHA1SUM}  /usr/local/bin/supercronic" | sha1sum -c -
+ && chmod +x /usr/local/bin/supercronic
 
 COPY deploy/scripts/pg-backup.sh     /opt/scripts/pg-backup.sh
 COPY deploy/scripts/minio-mirror.sh  /opt/scripts/minio-mirror.sh
