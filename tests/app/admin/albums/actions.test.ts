@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 
-vi.mock("@/lib/session", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/session")>("@/lib/session");
+vi.mock("@/lib/auth-check", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth-check")>("@/lib/auth-check");
   return {
     ...actual,
     requireAdminSessionFromCookies: vi.fn().mockResolvedValue({ ok: true, userId: "t", email: "t@t" }),

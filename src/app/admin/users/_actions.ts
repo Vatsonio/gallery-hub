@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireOwner, getAdminSession, invalidateUserStateCache } from "@/lib/session";
+import { requireOwner, invalidateUserStateCache } from "@/lib/auth-check";
+import { getAdminSession } from "@/lib/session";
 import {
   createUser,
   updateUser,

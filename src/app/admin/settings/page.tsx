@@ -9,7 +9,7 @@ import {
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
-import { requireOwner } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
 import {
   loadSettings,
   maskTokenTail,

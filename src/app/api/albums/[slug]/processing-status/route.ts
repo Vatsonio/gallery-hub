@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { getAlbumBySlug } from "@/lib/albums";
 import { sql } from "@/lib/db";
 

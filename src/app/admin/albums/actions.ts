@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdminSessionFromCookies } from "@/lib/session";
+import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import {
   createAlbum, updateAlbum, softDeleteAlbum,
   setCover, reorderPhotos, deletePhoto,

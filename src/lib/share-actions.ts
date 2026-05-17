@@ -2,7 +2,7 @@
 
 import { sql } from "@/lib/db";
 import { generateShareToken, listShareTokensForAlbum, type ShareLinkRow } from "@/lib/share";
-import { requireAdmin } from "@/lib/session";
+import { requireAdmin } from "@/lib/auth-check";
 import { hashPassword } from "@/lib/passwords";
 import { loadSettings } from "@/lib/settings";
 import { revalidatePath } from "next/cache";

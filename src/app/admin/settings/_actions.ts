@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireOwner } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
 import {
   loadSettings,
   saveSettings,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { s3Client, BUCKET, headObject } from "@/lib/minio";
 import { originalKey } from "@/lib/keys";
 import { sql } from "@/lib/db";

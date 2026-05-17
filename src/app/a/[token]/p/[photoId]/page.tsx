@@ -16,7 +16,7 @@ import {
   VIEWER_COOKIE,
 } from "@/lib/viewer";
 import { listFavoritePhotoIds } from "@/lib/favorites";
-import { requireAdminSessionFromCookies } from "@/lib/session";
+import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import Lightbox from "@/components/gallery/Lightbox";
 
 export const dynamic = "force-dynamic";

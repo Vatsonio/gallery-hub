@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { getAlbumById, insertPhotosBatch } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";

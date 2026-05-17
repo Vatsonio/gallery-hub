@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Heart } from "lucide-react";
 import { sql } from "@/lib/db";
-import { requireAdmin } from "@/lib/session";
+import { requireAdmin } from "@/lib/auth-check";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
 import { originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";

@@ -16,7 +16,7 @@ import {
   Sparkles,
   TrendingUp,
 } from "lucide-react";
-import { requireAdminSessionFromCookies } from "@/lib/session";
+import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import {
   loadInsightsStats,
   loadRecentActivity24h,

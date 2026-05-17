@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ChevronLeft, UserCog, Power, Trash2, KeyRound } from "lucide-react";
-import { requireOwner, getAdminSession } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
+import { getAdminSession } from "@/lib/session";
 import { getUserById } from "@/lib/users";
 import {
   updateUserAction,

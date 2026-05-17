@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { getAlbumById } from "@/lib/albums";
 import { presignPut } from "@/lib/presign";
 import { originalKey, extFromContentType } from "@/lib/keys";

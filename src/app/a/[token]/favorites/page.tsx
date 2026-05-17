@@ -18,7 +18,7 @@ import {
   VIEWER_COOKIE,
 } from "@/lib/viewer";
 import { listFavoritePhotoIds } from "@/lib/favorites";
-import { requireAdminSessionFromCookies } from "@/lib/session";
+import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import { computeExportSizes } from "@/lib/exportSizes";
 import { safeCapture } from "@/lib/analytics";
 import PhotoTile from "@/components/gallery/PhotoTile";
