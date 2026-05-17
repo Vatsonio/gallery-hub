@@ -7,6 +7,7 @@ import HeartOverlay from "./HeartOverlay";
 import { toggleFavorite } from "@/app/a/[token]/_actions";
 import { startViewTransition, setViewTransitionName } from "@/lib/view-transition";
 import { usePhotoLoadProgress } from "./PageLoadProgress";
+import { useFavoritesCount } from "./FavoritesCount";
 
 interface Props {
   token: string;
@@ -126,6 +127,10 @@ export default function PhotoTile({
   const inflight = useRef(false);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
+  // Live favorites badge — bumped optimistically on each tap, reconciled
+  // with the server response below. `bump` is stable across renders so
+  // it's safe to call from inside commitToggle without re-running effects.
+  const { bump: bumpFavoritesCount } = useFavoritesCount();
   const imgRef = useRef<HTMLImageElement>(null);
   // Only above-the-fold tiles register with the page-load progress bar.
   // Lazy tiles further down may never enter the viewport, which would
@@ -214,7 +219,10 @@ export default function PhotoTile({
 
   function commitToggle(intent: boolean): void {
     // Optimistic update; reconcile with server response.
+    const prev = favorited;
+    const shownDelta = intent === prev ? 0 : intent ? 1 : -1;
     setFavorited(intent);
+    if (shownDelta !== 0) bumpFavoritesCount(shownDelta);
     if (intent) setBurst((b) => b + 1);
     if (inflight.current) return;
     inflight.current = true;
@@ -222,8 +230,14 @@ export default function PhotoTile({
       try {
         const res = await toggleFavorite(token, photoId);
         setFavorited(res.favorited);
+        // Reconcile against the optimistic display. `truthDelta` is what
+        // the count *should* have moved by from `prev`; if it disagrees
+        // with the optimistic `shownDelta`, apply the difference.
+        const truthDelta = res.favorited === prev ? 0 : res.favorited ? 1 : -1;
+        if (truthDelta !== shownDelta) bumpFavoritesCount(truthDelta - shownDelta);
       } catch {
-        setFavorited(!intent);
+        setFavorited(prev);
+        if (shownDelta !== 0) bumpFavoritesCount(-shownDelta);
       } finally {
         inflight.current = false;
       }

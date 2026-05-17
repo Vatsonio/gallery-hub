@@ -11,6 +11,10 @@ import ExportModal, {
 } from "@/components/gallery/ExportModal";
 import PageLoadProgress from "@/components/gallery/PageLoadProgress";
 import PageSplash from "@/components/gallery/PageSplash";
+import {
+  FavoritesCountProvider,
+  useFavoritesCount,
+} from "@/components/gallery/FavoritesCount";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { ExportSizes } from "@/lib/exportSizes";
 
@@ -140,7 +144,13 @@ export default function GalleryShell({
     // — rather than at the share layout — keeps the toast surface
     // out of the public landing's password / locked screens, where
     // we never need it.
+    //
+    // FavoritesCountProvider drives the live heart badge in MobileTabBar
+    // (and any other consumer): tiles call `bump(±1)` on tap, server action
+    // races behind. The provider seeds from the server-rendered count and
+    // re-syncs whenever the route re-renders.
     <ToastProvider>
+     <FavoritesCountProvider initial={favoritesCount}>
       <PageLoadProgress
         cap={PROGRESS_CAP}
         enabled={exportSizes.totalCount > 0}
@@ -183,10 +193,7 @@ export default function GalleryShell({
             </span>
           </footer>
         )}
-        <MobileTabBar
-          token={token}
-          favoritesCount={favoritesCount}
-        />
+        <LiveMobileTabBar token={token} />
         <ExportModal
           open={exportOpen}
           onClose={() => setExportOpen(false)}
@@ -195,6 +202,19 @@ export default function GalleryShell({
           preselect={preselect}
         />
       </PageLoadProgress>
+     </FavoritesCountProvider>
     </ToastProvider>
   );
+}
+
+/**
+ * Thin wrapper that subscribes to the FavoritesCount context and feeds the
+ * live count into MobileTabBar. Lives here (instead of inside MobileTabBar
+ * itself) so the tab bar component stays decoupled from the share-route
+ * favourites context — it can still be reused in other surfaces with a
+ * static `favoritesCount` prop.
+ */
+function LiveMobileTabBar({ token }: { token: string }): React.ReactNode {
+  const { count } = useFavoritesCount();
+  return <MobileTabBar token={token} favoritesCount={count} />;
 }
