@@ -76,6 +76,11 @@ export async function middleware(req: NextRequest) {
 
   // Public share routes: ensure gh_viewer cookie exists (skipped for admin previews).
   if (PUBLIC_SHARE_RE.test(pathname)) {
+    // TODO: gate public share routes on the `maintenance.enabled` app_setting.
+    // When set, return a maintenance page (or 503) instead of running the
+    // viewer-cookie mint + page render. Reading app_settings from the Edge
+    // runtime needs either a cached lookup outside postgres.js or a sync
+    // signal pushed in at deploy time — out of scope for the settings page.
     const res = NextResponse.next({ request: { headers: req.headers } });
     await mintViewerCookieIfNeeded(req, res);
     return res;
