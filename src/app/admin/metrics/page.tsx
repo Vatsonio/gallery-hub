@@ -346,7 +346,7 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
         <p className="mt-3 text-[11px] text-text-muted">
           What the gallery-app container sees. Mounted Docker volumes appear here when
           they are bind-mounted into the container — overlay-only paths are pseudo
-          and hidden. On a Proxmox LXC without Docker this is the host's full mount
+          and hidden. On a Proxmox LXC without Docker this is the host&apos;s full mount
           table.
         </p>
       </section>
