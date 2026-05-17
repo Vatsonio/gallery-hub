@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getIronSession, type SessionOptions, type IronSession } from "iron-session";
+import { getUserById } from "@/lib/users";
 
 export interface AdminSession {
   userId?: string;
@@ -85,6 +86,39 @@ export function isOwner(r: AdminAuthResult): boolean {
  * Honors `x-test-admin: 1` header during tests (NODE_ENV === "test").
  * Otherwise reads the iron-session cookie from the request headers.
  */
+// F2 + F10: every admin request re-checks the DB row so disabled_at /
+// deletion takes effect on next request, and so the in-cookie role can be
+// refreshed from the live DB value (kills the "log out + back in" UX hit
+// after migrations/018). The 30 s in-process cache keeps the per-request
+// cost off the hot path; an owner who disables a hostile admin waits at
+// most one cache window for revocation.
+interface UserStateEntry {
+  expiresAt: number;
+  disabled: boolean;
+  role: "owner" | "admin" | null;
+}
+const USER_STATE_TTL_MS = 30_000;
+const userStateCache = new Map<string, UserStateEntry>();
+
+async function resolveLiveUserState(userId: string): Promise<UserStateEntry> {
+  const now = Date.now();
+  const hit = userStateCache.get(userId);
+  if (hit && hit.expiresAt > now) return hit;
+  const row = await getUserById(userId).catch(() => null);
+  const entry: UserStateEntry = {
+    expiresAt: now + USER_STATE_TTL_MS,
+    disabled: row === null || row.disabled_at !== null,
+    role: row?.role ?? null,
+  };
+  userStateCache.set(userId, entry);
+  return entry;
+}
+
+export function invalidateUserStateCache(userId?: string): void {
+  if (userId) userStateCache.delete(userId);
+  else userStateCache.clear();
+}
+
 export async function requireAdminSession(req: Request): Promise<AdminAuthResult> {
   if (process.env.NODE_ENV === "test" && req.headers.get("x-test-admin") === "1") {
     return { ok: true, userId: "test-admin", email: "test@local", role: "owner" };
@@ -108,13 +142,13 @@ export async function requireAdminSession(req: Request): Promise<AdminAuthResult
     sessionOptions
   );
   if (session.userId && session.email) {
+    const live = await resolveLiveUserState(session.userId);
+    if (live.disabled) return { ok: false };
     return {
       ok: true,
       userId: session.userId,
       email: session.email,
-      // Older sessions issued before the role rollout default to "admin" so
-      // they can keep using album CRUD; owner-only screens re-prompt login.
-      role: session.role ?? "admin",
+      role: live.role ?? session.role ?? "admin",
     };
   }
   return { ok: false };
@@ -123,11 +157,13 @@ export async function requireAdminSession(req: Request): Promise<AdminAuthResult
 export async function requireAdminSessionFromCookies(): Promise<AdminAuthResult> {
   const session = await getAdminSession();
   if (session.userId && session.email) {
+    const live = await resolveLiveUserState(session.userId);
+    if (live.disabled) return { ok: false };
     return {
       ok: true,
       userId: session.userId,
       email: session.email,
-      role: session.role ?? "admin",
+      role: live.role ?? session.role ?? "admin",
     };
   }
   return { ok: false };

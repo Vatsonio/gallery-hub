@@ -154,7 +154,7 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
               {disabled ? "This user is currently disabled." : "This user is active."}
             </p>
             <p className="mt-0.5 text-xs text-text-muted">
-              Disabled users cannot sign in. Their session is invalidated on next request.
+              Disabled users cannot sign in. Live sessions are revoked within 30 seconds.
             </p>
           </div>
           {statusEditable ? (
