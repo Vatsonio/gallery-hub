@@ -1,11 +1,24 @@
 "use server";
 
 import { sql } from "@/lib/db";
-import { generateShareToken, type ShareLinkRow } from "@/lib/share";
+import { generateShareToken, listShareTokensForAlbum, type ShareLinkRow } from "@/lib/share";
 import { requireAdmin } from "@/lib/session";
 import { hashPassword } from "@/lib/passwords";
 import { loadSettings } from "@/lib/settings";
 import { revalidatePath } from "next/cache";
+
+// F5: the /a/[token] page is ISR-cached for `revalidate = 60`. Without
+// explicit invalidation, a share-link revocation / password add / photo
+// delete stays invisible to viewers for up to 60 s. revalidateShareToken
+// is the single chokepoint admin mutations should call.
+export async function revalidateShareToken(token: string): Promise<void> {
+  revalidatePath(`/a/${token}`);
+}
+
+export async function revalidateAlbumShareTokens(albumId: string): Promise<void> {
+  const tokens = await listShareTokensForAlbum(albumId);
+  for (const t of tokens) revalidatePath(`/a/${t}`);
+}
 
 export interface CreateShareLinkInput {
   password?: string | null;
@@ -52,6 +65,7 @@ export async function createShareLink(albumId: string, input: CreateShareLinkInp
     `;
     if (rows[0]) {
       revalidatePath(`/admin/albums`);
+      revalidatePath(`/a/${rows[0].token}`);
       return rows[0];
     }
   }
@@ -74,6 +88,7 @@ export async function updateShareLink(token: string, input: UpdateShareLinkInput
   `;
   if (!rows[0]) throw new Error("share link not found");
   revalidatePath(`/admin/albums`);
+  revalidatePath(`/a/${token}`);
   return rows[0];
 }
 
@@ -81,4 +96,5 @@ export async function revokeShareLink(token: string): Promise<void> {
   await requireAdmin();
   await sql`DELETE FROM share_links WHERE token = ${token}`;
   revalidatePath(`/admin/albums`);
+  revalidatePath(`/a/${token}`);
 }

@@ -14,7 +14,26 @@ import { headObject } from "@/lib/minio";
 import { rewriteWatermarkPng } from "@/lib/watermarks";
 import { DEFAULT_WATERMARK_TEXT } from "@/lib/images";
 import { sql } from "@/lib/db";
+import { listShareTokensForAlbum } from "@/lib/share";
 import type { AlbumStatus } from "@/lib/types";
+
+// F5: any mutation that changes album content (cover, photos, watermark)
+// must invalidate every active share-link prerender for that album, else
+// /a/{token} can serve up-to-60-s-stale HTML carrying signed imgproxy
+// URLs to content the operator just revoked.
+async function revalidateAlbumTokens(albumId: string): Promise<void> {
+  const tokens = await listShareTokensForAlbum(albumId);
+  for (const t of tokens) revalidatePath(`/a/${t}`);
+}
+
+async function revalidateAlbumTokensForMany(albumIds: string[]): Promise<void> {
+  const seen = new Set<string>();
+  for (const id of albumIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    await revalidateAlbumTokens(id);
+  }
+}
 
 async function gate(): Promise<void> {
   // Test harness bypass: integration tests run server actions directly
@@ -40,34 +59,49 @@ export async function updateAlbumAction(id: string, patch: {
   await gate();
   await updateAlbum(id, patch);
   revalidatePath("/admin/albums");
+  await revalidateAlbumTokens(id);
 }
 
 export async function softDeleteAlbumAction(id: string): Promise<void> {
   await gate();
+  // Capture share tokens before soft-delete so the prerender is purged
+  // even after the row vanishes from listShareTokensForAlbum.
+  const tokens = await listShareTokensForAlbum(id);
   await softDeleteAlbum(id);
   revalidatePath("/admin/albums");
+  for (const t of tokens) revalidatePath(`/a/${t}`);
 }
 
 export async function setCoverAction(albumId: string, photoId: string): Promise<void> {
   await gate();
   await setCover(albumId, photoId);
   revalidatePath("/admin/albums");
+  await revalidateAlbumTokens(albumId);
 }
 
 export async function reorderPhotosAction(albumId: string, orderedIds: string[]): Promise<void> {
   await gate();
   await reorderPhotos(albumId, orderedIds);
+  await revalidateAlbumTokens(albumId);
 }
 
 export async function deletePhotoAction(photoId: string): Promise<void> {
   await gate();
+  // Look up the album_id before delete so we can invalidate the right
+  // share-link prerenders.
+  const rows = await sql<{ album_id: string }[]>`
+    SELECT album_id FROM photos WHERE id = ${photoId} LIMIT 1
+  `;
+  const albumId = rows[0]?.album_id;
   await deletePhoto(photoId);
+  if (albumId) await revalidateAlbumTokens(albumId);
 }
 
 export async function bulkDeletePhotosAction(albumId: string, photoIds: string[]): Promise<void> {
   await gate();
   await bulkDeletePhotos(albumId, photoIds);
   revalidatePath("/admin/albums");
+  await revalidateAlbumTokens(albumId);
 }
 
 export async function bulkMovePhotosAction(
@@ -78,6 +112,7 @@ export async function bulkMovePhotosAction(
   await gate();
   await bulkMovePhotos(srcAlbumId, dstAlbumId, photoIds);
   revalidatePath("/admin/albums");
+  await revalidateAlbumTokensForMany([srcAlbumId, dstAlbumId]);
 }
 
 export interface AlbumSummary {
@@ -118,6 +153,7 @@ export async function updateAlbumWatermarkAction(
   // no worker queue involvement needed in the imgproxy era.
   await sql`UPDATE photos SET updated_at = now() WHERE album_id = ${albumId}`;
   revalidatePath("/admin/albums");
+  await revalidateAlbumTokens(albumId);
 }
 
 /**
