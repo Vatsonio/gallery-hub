@@ -1,15 +1,11 @@
 import { notFound, redirect } from "next/navigation";
-import {
-  resolveShareLinkStatus,
-} from "@/lib/share";
-import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
 import { originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";
 import { imgproxyLarge, imgproxySrcset, photoVersionSeed } from "@/lib/imgproxy";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { watermarkKey } from "@/lib/watermarks";
 import { layoutJustifiedRows } from "@/lib/justified";
-import { computeStaticExportSizes } from "@/lib/exportSizes";
+import { loadShareData } from "@/lib/shareLoader";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import CoverImage from "@/components/gallery/CoverImage";
 import GalleryShell from "./_gallery-shell";
@@ -40,14 +36,14 @@ interface Props {
 export default async function PublicGalleryPage({ params }: Props) {
   const { token } = await params;
 
-  // Read share-link status *without* the unlock cookie: this is the only
-  // path the static prerender can take. Password-protected albums always
-  // come back as "locked" here and we route them to the password page,
-  // which itself is dynamic. Public albums proceed.
-  const status = await resolveShareLinkStatus(token, null);
+  // Cached per-token loader (unstable_cache wrapper). All DB reads land in
+  // Next's full-route cache for `revalidate = 60`, so subsequent hits to
+  // the same token render zero queries until the window expires or an
+  // admin action calls `revalidateShareLink(token)`.
+  const data = await loadShareData(token);
 
-  if (status.kind === "not_found") notFound();
-  if (status.kind === "expired") {
+  if (data.kind === "not_found") notFound();
+  if (data.kind === "expired") {
     return (
       <main className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -57,17 +53,14 @@ export default async function PublicGalleryPage({ params }: Props) {
       </main>
     );
   }
-  if (status.kind === "locked") {
+  if (data.kind === "locked") {
     redirect(`/a/${token}/password`);
   }
 
-  const album = await getAlbumById(status.link.album_id);
-  if (!album) notFound();
-
-  const photos = (await listPhotos(album.id)).filter((p) => p.status === "ready");
-
-  const albumWatermark = await getAlbumWatermark(album.id);
-  const watermarkRef = albumWatermark.enabled ? { key: watermarkKey(album.id) } : null;
+  const album = data.album;
+  const photos = data.photos;
+  const watermarkRef = data.watermarkEnabled ? { key: watermarkKey(album.id) } : null;
+  const staticSizes = data.staticSizes;
 
   const decorated = photos.map((p) => {
     const origKey = originalKey(album.id, p.id, resolveOriginalExt(p.filename));
@@ -119,11 +112,6 @@ export default async function PublicGalleryPage({ params }: Props) {
 
   const photoMap = new Map(decorated.map((p) => [p.id, p]));
   const photoIndex = new Map(decorated.map((p, i) => [p.id, i]));
-
-  // Token-only export sizes — `favoritesCount` and `favoritesOriginalBytes`
-  // are zeroed at this point; the dynamic viewer island swaps them in
-  // for the per-viewer numbers the moment cookies resolve.
-  const staticSizes = await computeStaticExportSizes(album.id);
 
   return (
     <GalleryShell token={token} staticSizes={staticSizes}>

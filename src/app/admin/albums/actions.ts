@@ -11,6 +11,7 @@ import {
   listAlbums,
 } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
+import { revalidateShareLink } from "@/lib/shareLoader";
 import { originalKey } from "@/lib/keys";
 import { headObject } from "@/lib/minio";
 import { rewriteWatermarkPng } from "@/lib/watermarks";
@@ -25,7 +26,15 @@ import type { AlbumStatus } from "@/lib/types";
 // URLs to content the operator just revoked.
 async function revalidateAlbumTokens(albumId: string): Promise<void> {
   const tokens = await listShareTokensForAlbum(albumId);
-  for (const t of tokens) revalidatePath(`/a/${t}`);
+  for (const t of tokens) {
+    // Two-pronged invalidation:
+    //   - revalidatePath busts the Next route segment cache (HTML).
+    //   - revalidateShareLink busts the per-token unstable_cache loader
+    //     so the next render re-runs DB queries instead of serving the
+    //     previous album snapshot.
+    revalidatePath(`/a/${t}`);
+    revalidateShareLink(t);
+  }
 }
 
 async function revalidateAlbumTokensForMany(albumIds: string[]): Promise<void> {
@@ -72,7 +81,10 @@ export async function softDeleteAlbumAction(id: string): Promise<void> {
   const tokens = await listShareTokensForAlbum(id);
   await purgeAlbumStorage(id);
   revalidatePath("/admin/albums");
-  for (const t of tokens) revalidatePath(`/a/${t}`);
+  for (const t of tokens) {
+    revalidatePath(`/a/${t}`);
+    revalidateShareLink(t);
+  }
 }
 
 /**
