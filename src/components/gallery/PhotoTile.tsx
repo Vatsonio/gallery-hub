@@ -8,6 +8,7 @@ import { toggleFavorite } from "@/app/a/[token]/_actions";
 import { startViewTransition, setViewTransitionName } from "@/lib/view-transition";
 import { usePhotoLoadProgress } from "./PageLoadProgress";
 import { useFavoritesCount } from "./FavoritesCount";
+import { useFavoritedIds, useFavoritedIdsActions } from "./FavoritedIds";
 
 interface Props {
   token: string;
@@ -131,6 +132,17 @@ export default function PhotoTile({
   // with the server response below. `bump` is stable across renders so
   // it's safe to call from inside commitToggle without re-running effects.
   const { bump: bumpFavoritesCount } = useFavoritesCount();
+  // Favorited-ids set hydrated by the dynamic viewer island (PPR). Until
+  // the island lands, `favoritedIds` is null and the tile keeps whatever
+  // initialFavorited was rendered into the static shell (false on prerender,
+  // true on per-request SSR fallback). After hydration we mirror the set.
+  const favoritedIds = useFavoritedIds();
+  const { toggle: toggleFavoritedId } = useFavoritedIdsActions();
+  useEffect(() => {
+    if (favoritedIds === null) return;
+    const next = favoritedIds.has(photoId);
+    setFavorited((cur) => (cur === next ? cur : next));
+  }, [favoritedIds, photoId]);
   const imgRef = useRef<HTMLImageElement>(null);
   // Only above-the-fold tiles register with the page-load progress bar.
   // Lazy tiles further down may never enter the viewport, which would
@@ -222,6 +234,7 @@ export default function PhotoTile({
     const prev = favorited;
     const shownDelta = intent === prev ? 0 : intent ? 1 : -1;
     setFavorited(intent);
+    toggleFavoritedId(photoId, intent);
     if (shownDelta !== 0) bumpFavoritesCount(shownDelta);
     if (intent) setBurst((b) => b + 1);
     if (inflight.current) return;
@@ -230,6 +243,7 @@ export default function PhotoTile({
       try {
         const res = await toggleFavorite(token, photoId);
         setFavorited(res.favorited);
+        toggleFavoritedId(photoId, res.favorited);
         // Reconcile against the optimistic display. `truthDelta` is what
         // the count *should* have moved by from `prev`; if it disagrees
         // with the optimistic `shownDelta`, apply the difference.
@@ -237,6 +251,7 @@ export default function PhotoTile({
         if (truthDelta !== shownDelta) bumpFavoritesCount(truthDelta - shownDelta);
       } catch {
         setFavorited(prev);
+        toggleFavoritedId(photoId, prev);
         if (shownDelta !== 0) bumpFavoritesCount(-shownDelta);
       } finally {
         inflight.current = false;

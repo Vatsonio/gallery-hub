@@ -27,6 +27,31 @@ export interface ExportSizes {
 const WEB_VARIANT_RATIO = 0.22;
 
 /**
+ * Token-only export sizes — same shape as `computeExportSizes`, but the
+ * viewer-specific fields are zeroed. Used by the PPR static prerender,
+ * which can't read cookies. The dynamic viewer island streams real
+ * favorites bytes/count moments later and the ExportSizes context
+ * replaces the seed.
+ */
+export async function computeStaticExportSizes(albumId: string): Promise<ExportSizes> {
+  const rows = await sql<{ count: string; orig: string }[]>`
+    SELECT COUNT(*)::text AS count,
+           COALESCE(SUM(orig_bytes), 0)::text AS orig
+      FROM photos
+     WHERE album_id = ${albumId} AND status = 'ready'
+  `;
+  const r = rows[0] ?? { count: "0", orig: "0" };
+  const origTotal = Number(r.orig);
+  return {
+    favoritesCount: 0,
+    favoritesOriginalBytes: 0,
+    totalCount: Number(r.count),
+    allOriginalBytes: origTotal,
+    allWebBytes: Math.round(origTotal * WEB_VARIANT_RATIO),
+  };
+}
+
+/**
  * Aggregates byte totals for the export modal in a single DB roundtrip
  * pair. Counts come from the same scan so they're guaranteed consistent
  * with the byte totals shown next to them.

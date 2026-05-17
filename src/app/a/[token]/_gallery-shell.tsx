@@ -15,6 +15,11 @@ import {
   FavoritesCountProvider,
   useFavoritesCount,
 } from "@/components/gallery/FavoritesCount";
+import { FavoritedIdsProvider } from "@/components/gallery/FavoritedIds";
+import {
+  ExportSizesProvider,
+  useExportSizes,
+} from "@/components/gallery/ExportSizesContext";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { ExportSizes } from "@/lib/exportSizes";
 
@@ -30,34 +35,45 @@ const PROGRESS_CAP = 32;
 
 interface Props {
   token: string;
-  /** Number of favorites the current viewer has (for the dock + tab badge). */
-  favoritesCount: number;
-  /** Optional human-readable size of the favorited set (e.g. "23 MB"). */
-  favoritesSizeLabel?: string;
-  /** Byte totals + counts for the three export options. */
-  exportSizes: ExportSizes;
-  /** True when the viewer is an admin previewing — favorites won't persist. */
-  isAdminPreview?: boolean;
+  /**
+   * Token-only export sizes (album total bytes/count + favorites zeroed).
+   * The static PPR shell ships this; ExportSizesHydration replaces the
+   * favorites parts the moment the dynamic viewer island streams in.
+   */
+  staticSizes: ExportSizes;
   children: React.ReactNode;
 }
 
 /**
  * Client-side shell hosting the floating export dock + mobile tab bar +
- * three-option export modal. Wraps server-rendered gallery / favorites
- * children. The shell never fetches — its parent server component
- * supplies all data so the dock and modal render correctly on first
- * paint.
+ * three-option export modal. Mounts the favorites + export-sizes contexts
+ * that the static prerender feeds (with viewer-specific bits zeroed) and
+ * the dynamic viewer island hydrates with per-cookie data.
  */
-export default function GalleryShell({
+export default function GalleryShell({ token, staticSizes, children }: Props) {
+  return (
+    <ToastProvider>
+     <FavoritesCountProvider initial={0}>
+     <FavoritedIdsProvider>
+     <ExportSizesProvider initial={staticSizes}>
+      <GalleryShellInner token={token}>{children}</GalleryShellInner>
+     </ExportSizesProvider>
+     </FavoritedIdsProvider>
+     </FavoritesCountProvider>
+    </ToastProvider>
+  );
+}
+
+function GalleryShellInner({
   token,
-  favoritesCount,
-  favoritesSizeLabel,
-  exportSizes,
-  isAdminPreview = false,
   children,
-}: Props) {
+}: {
+  token: string;
+  children: React.ReactNode;
+}): React.ReactNode {
   const [exportOpen, setExportOpen] = useState(false);
   const [preselect, setPreselect] = useState<ExportOptionId | undefined>(undefined);
+  const exportSizes = useExportSizes();
 
   // Restore scroll position when returning from the single-photo lightbox.
   // PhotoTile writes sessionStorage[gh:return-scroll:<token>] before nav;
@@ -78,8 +94,6 @@ export default function GalleryShell({
       ) {
         return;
       }
-      // Two rafs: first lets the layout settle, second runs after images
-      // claim their reserved sizes. Reduce-motion users get an instant jump.
       const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -101,9 +115,7 @@ export default function GalleryShell({
         title: "Favorites — originals",
         subtitle:
           exportSizes.favoritesCount === 0
-            ? isAdminPreview
-              ? "Admin preview — open the link in incognito to like photos"
-              : "Like some photos first to enable this export"
+            ? "Like some photos first to enable this export"
             : `${exportSizes.favoritesCount} photo${exportSizes.favoritesCount === 1 ? "" : "s"} · full quality`,
         bytes: exportSizes.favoritesOriginalBytes,
         disabled: exportSizes.favoritesCount === 0,
@@ -130,89 +142,51 @@ export default function GalleryShell({
         disabled: exportSizes.totalCount === 0,
       },
     ],
-    [exportSizes, isAdminPreview],
+    [exportSizes],
   );
 
-  // No floating CTA anymore. Both whole-album and favorites exports are
-  // entered from the footer "Save all" button → ExportModal picks the
-  // right scope. Keeps the chrome quiet during browsing.
   const showSaveAllFooter = exportSizes.totalCount > 0;
 
   return (
-    // ToastProvider wraps everything so ExportModal (and any future
-    // child) can surface validation/error feedback. Mounting it here
-    // — rather than at the share layout — keeps the toast surface
-    // out of the public landing's password / locked screens, where
-    // we never need it.
-    //
-    // FavoritesCountProvider drives the live heart badge in MobileTabBar
-    // (and any other consumer): tiles call `bump(±1)` on tap, server action
-    // races behind. The provider seeds from the server-rendered count and
-    // re-syncs whenever the route re-renders.
-    <ToastProvider>
-     <FavoritesCountProvider initial={favoritesCount}>
-      <PageLoadProgress
-        cap={PROGRESS_CAP}
-        enabled={exportSizes.totalCount > 0}
-      >
-        {/*
-          Full-page splash overlay. Renders at z-100 above everything,
-          fades out once the cover + first ~8 tiles have landed. Empty
-          albums skip rendering entirely so we don't show a spinner over
-          a "no photos" message. The splash MUST live INSIDE
-          PageLoadProgress (it subscribes via context) and OUTSIDE the
-          children sequence (so it can sit above the cover hero
-          z-order-wise without disrupting layout).
-        */}
-        <PageSplash enabled={exportSizes.totalCount > 0} />
-        {isAdminPreview && (
-          <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
-            Admin preview — favorites and views are not recorded. Open the link in
-            a private window to test as a real visitor.
-          </div>
-        )}
-        {children}
-        {showSaveAllFooter && (
-          <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">
-            <button
-              type="button"
-              onClick={() => {
-                setPreselect("all-original");
-                setExportOpen(true);
-              }}
-              className="group inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/90 backdrop-blur hover:border-white/20 hover:bg-white/[0.08] transition cursor-pointer"
-            >
-              <FileImage className="h-4 w-4 text-white/70 group-hover:text-white transition" />
-              <span>Save all</span>
-              <span className="text-white/50">
-                {exportSizes.totalCount} photo{exportSizes.totalCount === 1 ? "" : "s"}
-              </span>
-            </button>
-            <span className="text-[10px] uppercase tracking-[0.2em] text-white/25">
-              gallery.divass.space
+    <PageLoadProgress cap={PROGRESS_CAP} enabled={exportSizes.totalCount > 0}>
+      <PageSplash enabled={exportSizes.totalCount > 0} />
+      {children}
+      {showSaveAllFooter && (
+        <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">
+          <button
+            type="button"
+            onClick={() => {
+              setPreselect("all-original");
+              setExportOpen(true);
+            }}
+            className="group inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/90 backdrop-blur hover:border-white/20 hover:bg-white/[0.08] transition cursor-pointer"
+          >
+            <FileImage className="h-4 w-4 text-white/70 group-hover:text-white transition" />
+            <span>Save all</span>
+            <span className="text-white/50">
+              {exportSizes.totalCount} photo{exportSizes.totalCount === 1 ? "" : "s"}
             </span>
-          </footer>
-        )}
-        <LiveMobileTabBar token={token} />
-        <ExportModal
-          open={exportOpen}
-          onClose={() => setExportOpen(false)}
-          token={token}
-          options={options}
-          preselect={preselect}
-        />
-      </PageLoadProgress>
-     </FavoritesCountProvider>
-    </ToastProvider>
+          </button>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-white/25">
+            gallery.divass.space
+          </span>
+        </footer>
+      )}
+      <LiveMobileTabBar token={token} />
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        token={token}
+        options={options}
+        preselect={preselect}
+      />
+    </PageLoadProgress>
   );
 }
 
 /**
  * Thin wrapper that subscribes to the FavoritesCount context and feeds the
- * live count into MobileTabBar. Lives here (instead of inside MobileTabBar
- * itself) so the tab bar component stays decoupled from the share-route
- * favourites context — it can still be reused in other surfaces with a
- * static `favoritesCount` prop.
+ * live count into MobileTabBar.
  */
 function LiveMobileTabBar({ token }: { token: string }): React.ReactNode {
   const { count } = useFavoritesCount();

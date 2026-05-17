@@ -23,6 +23,8 @@ import { computeExportSizes } from "@/lib/exportSizes";
 import { safeCapture } from "@/lib/analytics";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "../_gallery-shell";
+import ViewerHydration from "@/components/gallery/ViewerHydration";
+import { ExportSizesHydration } from "@/components/gallery/ExportSizesContext";
 
 export const dynamic = "force-dynamic";
 
@@ -91,10 +93,10 @@ export default async function FavoritesPage({ params }: Props) {
     return (
       <GalleryShell
         token={token}
-        favoritesCount={0}
-        exportSizes={emptySizes}
-        isAdminPreview={adminSession.ok}
+        staticSizes={emptySizes}
       >
+        <ViewerHydration favoriteIds={[]} favoritesCount={0} />
+        <ExportSizesHydration sizes={emptySizes} />
         <Header token={token} count={0} />
         <main className="flex flex-col items-center justify-center px-6 py-24 text-center text-white/60 min-h-[60vh]">
           <div className="text-2xl font-light text-white/80">No favorites yet</div>
@@ -164,11 +166,10 @@ export default async function FavoritesPage({ params }: Props) {
   return (
     <GalleryShell
       token={token}
-      favoritesCount={favIds.length}
-      favoritesSizeLabel={sizeLabel}
-      exportSizes={exportSizes}
-      isAdminPreview={adminSession.ok}
+      staticSizes={exportSizes}
     >
+      <ViewerHydration favoriteIds={favIds} favoritesCount={favIds.length} />
+      <ExportSizesHydration sizes={exportSizes} />
       <Header token={token} count={favIds.length} />
       <div className="mx-auto max-w-screen-2xl">
         {/* Mobile */}

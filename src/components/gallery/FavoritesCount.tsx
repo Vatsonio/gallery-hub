@@ -12,11 +12,18 @@ interface FavoritesCountValue {
    * with the opposite delta to roll back).
    */
   bump: (delta: number) => void;
+  /**
+   * Replace the count outright. Used by the PPR viewer-hydration island
+   * when the dynamic favorites lookup streams in — the static shell
+   * couldn't know the per-viewer count at prerender time, so it seeded 0.
+   */
+  setCount: (next: number) => void;
 }
 
 const FavoritesCountContext = createContext<FavoritesCountValue>({
   count: 0,
   bump: () => undefined,
+  setCount: () => undefined,
 });
 
 /**
@@ -56,8 +63,12 @@ export function FavoritesCountProvider({ initial, children }: ProviderProps): Re
     setCount((c) => Math.max(0, c + delta));
   }, []);
 
+  const setCountDirect = useCallback((next: number): void => {
+    setCount(Math.max(0, next));
+  }, []);
+
   return (
-    <FavoritesCountContext.Provider value={{ count, bump }}>
+    <FavoritesCountContext.Provider value={{ count, bump, setCount: setCountDirect }}>
       {children}
     </FavoritesCountContext.Provider>
   );
