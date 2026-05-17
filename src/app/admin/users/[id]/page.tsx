@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ChevronLeft, UserCog, Power, Trash2, KeyRound } from "lucide-react";
-import { requireOwner, getAdminSession } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
+import { getAdminSession } from "@/lib/session";
 import { getUserById } from "@/lib/users";
 import {
   updateUserAction,
@@ -154,7 +155,7 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
               {disabled ? "This user is currently disabled." : "This user is active."}
             </p>
             <p className="mt-0.5 text-xs text-text-muted">
-              Disabled users cannot sign in. Their session is invalidated on next request.
+              Disabled users cannot sign in. Live sessions are revoked within 30 seconds.
             </p>
           </div>
           {statusEditable ? (

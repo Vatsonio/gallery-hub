@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireOwner, getAdminSession } from "@/lib/session";
+import { requireOwner, invalidateUserStateCache } from "@/lib/auth-check";
+import { getAdminSession } from "@/lib/session";
 import {
   createUser,
   updateUser,
@@ -13,6 +14,26 @@ import {
 
 function encodeMessage(msg: string): string {
   return encodeURIComponent(msg);
+}
+
+// F6: map known errors to short user-facing strings so raw Postgres /
+// validation messages never reach the URL bar or access logs. Unknown
+// errors collapse to a stable "internal" code; the real message stays
+// in the server console.
+function safeErrorMessage(err: unknown, context: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (raw.includes("duplicate") || raw.includes("unique")) {
+    return "An account with that email already exists";
+  }
+  if (raw.includes("cannot demote the only owner")) return "Cannot demote the only owner";
+  if (raw.includes("cannot promote an admin to owner")) return "Cannot promote an admin to owner (one owner only)";
+  if (raw.includes("cannot delete the owner")) return "Cannot delete the owner";
+  if (raw.includes("invalid email")) return "Enter a valid email";
+  if (raw.includes("password too short")) return "Password must be at least 8 characters";
+  if (raw.includes("invalid role")) return "Invalid role";
+  // eslint-disable-next-line no-console
+  console.warn(`[admin/users] ${context} failed:`, raw);
+  return "Could not complete the request";
 }
 
 export async function createUserAction(formData: FormData): Promise<void> {
@@ -32,11 +53,7 @@ export async function createUserAction(formData: FormData): Promise<void> {
   try {
     await createUser({ email, password, name, role: "admin" });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Could not create user";
-    const friendly = msg.includes("duplicate") || msg.includes("unique")
-      ? "An account with that email already exists"
-      : msg;
-    redirect(`/admin/users/new?error=${encodeMessage(friendly)}`);
+    redirect(`/admin/users/new?error=${encodeMessage(safeErrorMessage(err, "createUser"))}`);
   }
 
   revalidatePath("/admin/users");
@@ -61,11 +78,14 @@ export async function updateUserAction(formData: FormData): Promise<void> {
   try {
     await updateUser(id, { name, role, disabled });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Could not update user";
     const back = returnTo === "list" ? "/admin/users" : `/admin/users/${id}`;
-    redirect(`${back}?error=${encodeMessage(msg)}`);
+    redirect(`${back}?error=${encodeMessage(safeErrorMessage(err, "updateUser"))}`);
   }
 
+  // F2: live session lookups cache disabled/role for 30s — invalidate
+  // immediately so the change takes effect on the next request, not in
+  // up to 30 seconds.
+  invalidateUserStateCache(id);
   revalidatePath("/admin/users");
   revalidatePath(`/admin/users/${id}`);
   const successBack = returnTo === "list" ? "/admin/users" : `/admin/users/${id}`;
@@ -90,8 +110,7 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
   try {
     await setUserPassword(id, pwd);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Could not reset password";
-    redirect(`/admin/users/${id}?error=${encodeMessage(msg)}`);
+    redirect(`/admin/users/${id}?error=${encodeMessage(safeErrorMessage(err, "resetPassword"))}`);
   }
 
   revalidatePath(`/admin/users/${id}`);
@@ -116,10 +135,10 @@ export async function deleteUserAction(formData: FormData): Promise<void> {
   try {
     await deleteUser(id);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Could not delete user";
-    redirect(`/admin/users?error=${encodeMessage(msg)}`);
+    redirect(`/admin/users?error=${encodeMessage(safeErrorMessage(err, "deleteUser"))}`);
   }
 
+  invalidateUserStateCache(id);
   revalidatePath("/admin/users");
   redirect(`/admin/users?ok=${encodeMessage("User deleted")}`);
 }

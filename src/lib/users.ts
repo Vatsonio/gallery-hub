@@ -111,6 +111,12 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Ad
   if (current.role === "owner" && input.role === "admin") {
     throw new Error("cannot demote the only owner");
   }
+  // F11: code-level symmetry with the DB partial-unique index on owner.
+  // Without this, the failure surface is a raw 23505 propagating up to
+  // the operator.
+  if (current.role === "admin" && input.role === "owner") {
+    throw new Error("cannot promote an admin to owner (one owner only)");
+  }
   const disabledAt =
     input.disabled === undefined
       ? null

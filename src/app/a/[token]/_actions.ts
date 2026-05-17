@@ -11,7 +11,7 @@ import {
 import { verifyPassword } from "@/lib/passwords";
 import { toggleFavoriteForViewer } from "@/lib/favorites";
 import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
-import { requireAdminSessionFromCookies } from "@/lib/session";
+import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import { safeCapture } from "@/lib/analytics";
 import { notifyFavoritesBurst } from "@/lib/notifications";
 import { sql } from "@/lib/db";

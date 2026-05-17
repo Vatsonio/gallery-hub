@@ -51,15 +51,13 @@ async function resolveRequestIp(): Promise<string> {
   return resolveIpFromHeaders(h);
 }
 
-// Lazy dummy argon2 hash. Used to constant-time the user-not-found branch of
-// authenticate() so an attacker can't enumerate valid admin emails via the
-// response-time delta (F4 in the 2026-05-16 pentest measured ~37 ms).
-// Computed once on first use to avoid baking a literal hash into source.
-let dummyHashPromise: Promise<string> | null = null;
+// F12: eager-init the dummy hash at module load so the first no-user login
+// attempt does NOT pay the extra ~200 ms argon2 cost (which would leak a
+// "first request after boot" timing signal vs subsequent ones). Steady-
+// state behaviour is unchanged: every authenticate() call against an
+// unknown email burns exactly one verifyPassword against this hash.
+const dummyHashPromise: Promise<string> = hashPassword("::not-a-real-password::");
 function getDummyHash(): Promise<string> {
-  if (!dummyHashPromise) {
-    dummyHashPromise = hashPassword("::not-a-real-password::");
-  }
   return dummyHashPromise;
 }
 

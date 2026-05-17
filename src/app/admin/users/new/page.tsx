@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, UserPlus } from "lucide-react";
-import { requireOwner } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
 import { createUserAction } from "../_actions";
 import { PasswordField } from "../_PasswordField";
 

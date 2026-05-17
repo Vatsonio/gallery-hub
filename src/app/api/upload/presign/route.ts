@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { getAlbumById } from "@/lib/albums";
 import { presignPut } from "@/lib/presign";
 import { originalKey, extFromContentType } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
+import { loadSettings } from "@/lib/settings";
+import { getStorageUsage } from "@/lib/storage-usage";
 import type { PresignRequestBody, PresignResponse } from "@/lib/types";
 
-// Wedding shoots routinely exceed 200 files. Cap chosen to be high
-// enough for real sessions but low enough that a single batch still
-// fits inside Next's default body limits and finishes signing inside
-// the route's runtime budget.
-const MAX_FILES = 1000;
-const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
+// Hard upper bound on a single presign batch — guards Next's default body
+// limits and the route runtime budget. The per-operator soft cap lives in
+// app_settings.uploads.max_files_per_album.
+const HARD_MAX_FILES = 1000;
 
 export async function POST(req: Request): Promise<Response> {
   const auth = await requireAdminSession(req);
@@ -31,19 +31,34 @@ export async function POST(req: Request): Promise<Response> {
   if (!body?.album_id || !Array.isArray(body.files)) {
     return NextResponse.json({ error: "album_id and files required" }, { status: 400 });
   }
-  if (body.files.length === 0 || body.files.length > MAX_FILES) {
-    return NextResponse.json({ error: `files must be 1..${MAX_FILES}` }, { status: 400 });
+
+  // F4: settings-driven caps. Hard ceilings still apply on top so a
+  // bad app_settings row can't unbound the route.
+  const settings = await loadSettings();
+  const maxFiles = Math.min(HARD_MAX_FILES, settings.uploads.max_files_per_album);
+  const maxSize = settings.uploads.max_file_size_mb * 1024 * 1024;
+
+  if (body.files.length === 0 || body.files.length > maxFiles) {
+    return NextResponse.json({ error: `files must be 1..${maxFiles}` }, { status: 400 });
   }
 
   const album = await getAlbumById(body.album_id);
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
 
+  if (settings.storage.block_uploads_when_full) {
+    const usage = await getStorageUsage();
+    const capBytes = settings.storage.max_gb * 1_000_000_000;
+    if (usage.usedBytes >= capBytes) {
+      return NextResponse.json({ reason: "storage_full" }, { status: 507 });
+    }
+  }
+
   // Validate everything up-front so a single bad row fails fast and
   // we don't waste presign time on the others.
   for (const f of body.files) {
-    if (f.size > MAX_SIZE) {
+    if (f.size > maxSize) {
       return NextResponse.json(
-        { error: `${f.filename} exceeds ${MAX_SIZE} bytes` },
+        { error: `${f.filename} exceeds ${maxSize} bytes` },
         { status: 400 },
       );
     }

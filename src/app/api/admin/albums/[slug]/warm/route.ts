@@ -18,7 +18,7 @@
  *     stays in lockstep with on-demand renders.
  */
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { isSameOrigin } from "@/lib/same-origin";
 import { getAlbumBySlug, listPhotoIdsForRegeneration } from "@/lib/albums";
 import { originalKey } from "@/lib/keys";

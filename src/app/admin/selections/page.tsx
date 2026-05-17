@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { sql } from "@/lib/db";
-import { requireAdmin } from "@/lib/session";
+import { requireAdmin } from "@/lib/auth-check";
 import { ADMIN_PREVIEW_VIEWER_ID } from "@/lib/viewer";
 
 export const dynamic = "force-dynamic";

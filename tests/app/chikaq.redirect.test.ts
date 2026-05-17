@@ -25,7 +25,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 // Mock the session helper so we control whether the admin appears logged in.
-vi.mock("@/lib/session", () => ({
+vi.mock("@/lib/auth-check", () => ({
   requireAdminSessionFromCookies: vi.fn(async () => ({ ok: false as const })),
 }));
 
@@ -67,7 +67,7 @@ describe("/chikaq", () => {
   });
 
   it("does not redirect when the admin session is valid", async () => {
-    const session = await import("@/lib/session");
+    const session = await import("@/lib/auth-check");
     (session.requireAdminSessionFromCookies as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       userId: "admin-1",

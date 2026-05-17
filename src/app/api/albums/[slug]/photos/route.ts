@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { getAlbumBySlug, listPhotos, getAlbumWatermark } from "@/lib/albums";
 import { originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";

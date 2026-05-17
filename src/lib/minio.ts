@@ -4,6 +4,9 @@ import {
   CreateBucketCommand,
   HeadObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
   type HeadObjectCommandOutput
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -82,6 +85,66 @@ export async function getPresignedUrl(key: string, ttlSec: number, bucket: strin
   return getSignedUrl(s3SignerClient, new GetObjectCommand({ Bucket: bucket, Key: key }), {
     expiresIn: ttlSec,
   });
+}
+
+export async function deleteObject(key: string, bucket: string = BUCKET): Promise<void> {
+  await s3Client
+    .send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+    .catch(() => undefined);
+}
+
+/**
+ * List every object under `prefix` and return their keys. Walks the
+ * 1000-key pagination ceiling that S3 / MinIO impose on ListObjectsV2.
+ */
+export async function listObjectKeys(prefix: string, bucket: string = BUCKET): Promise<string[]> {
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const res = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: token,
+        MaxKeys: 1000,
+      }),
+    );
+    for (const o of res.Contents ?? []) if (o.Key) keys.push(o.Key);
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return keys;
+}
+
+/**
+ * Delete every object under `prefix`. Used by the album-purge path to
+ * reap originals + watermark assets when an album is wiped. Returns the
+ * number of keys actually deleted (best-effort; per-batch errors are
+ * swallowed so a single corrupt key can't block the rest).
+ */
+export async function deleteObjectsByPrefix(
+  prefix: string,
+  bucket: string = BUCKET,
+): Promise<number> {
+  const keys = await listObjectKeys(prefix, bucket);
+  if (keys.length === 0) return 0;
+  let deleted = 0;
+  // DeleteObjects caps at 1000 keys per request — chunk to that.
+  for (let i = 0; i < keys.length; i += 1000) {
+    const slice = keys.slice(i, i + 1000);
+    const res = await s3Client
+      .send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: {
+            Objects: slice.map((Key) => ({ Key })),
+            Quiet: true,
+          },
+        }),
+      )
+      .catch(() => null);
+    if (res) deleted += slice.length - (res.Errors?.length ?? 0);
+  }
+  return deleted;
 }
 
 export async function ensureBucket(bucket: string = BUCKET): Promise<void> {

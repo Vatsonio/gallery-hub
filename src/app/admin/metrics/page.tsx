@@ -9,7 +9,7 @@ import {
   Heart,
   Users as UsersIcon,
 } from "lucide-react";
-import { requireOwner } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
 import {
   getStorageMetrics,
   getViewsMetrics,

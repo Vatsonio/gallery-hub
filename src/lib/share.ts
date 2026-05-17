@@ -82,3 +82,10 @@ export async function resolveShareLinkStatus(
   }
   return { kind: 'ok', link };
 }
+
+export async function listShareTokensForAlbum(albumId: string): Promise<string[]> {
+  const rows = await sql<{ token: string }[]>`
+    SELECT token FROM share_links WHERE album_id = ${albumId}
+  `;
+  return rows.map((r) => r.token);
+}

@@ -1,5 +1,5 @@
 import { Bell, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
-import { requireAdmin } from "@/lib/session";
+import { requireAdmin } from "@/lib/auth-check";
 import { sql } from "@/lib/db";
 import { updateRule, testNotification, replayFailed } from "./actions";
 

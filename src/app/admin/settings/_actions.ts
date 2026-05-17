@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireOwner } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
 import {
   loadSettings,
   saveSettings,
@@ -158,20 +158,31 @@ export async function saveTelegramSettings(form: FormData): Promise<void> {
     if (form.get(`event_${key}`) === "on") events.push(key);
   }
 
+  // F8: when TELEGRAM_BOT_TOKEN is set in the environment the worker
+  // already uses it as the source of truth — refuse to also persist a
+  // copy in app_settings (plaintext at rest) so a DB dump can't leak it.
+  const envTokenSet = (process.env.TELEGRAM_BOT_TOKEN ?? "").length > 0;
   const replaceToken = form.get("replace_token") === "1";
   const incomingToken =
     typeof form.get("bot_token") === "string"
       ? (form.get("bot_token") as string).trim()
       : "";
-  let bot_token = current.telegram.bot_token;
-  if (replaceToken) {
+  let bot_token = envTokenSet ? "" : current.telegram.bot_token;
+  if (envTokenSet && incomingToken.length > 0) {
+    fail(section, "Token is set via TELEGRAM_BOT_TOKEN env var; clear it there");
+  }
+  if (!envTokenSet && replaceToken) {
     if (incomingToken.length === 0) {
       fail(section, "Provide a token or cancel the replacement");
     }
     bot_token = incomingToken;
   }
 
-  if (enabled && (bot_token.length === 0 || chat_id.length === 0)) {
+  // For the "enabled" precondition: prefer env over DB.
+  const effectiveTokenLen = envTokenSet
+    ? (process.env.TELEGRAM_BOT_TOKEN ?? "").length
+    : bot_token.length;
+  if (enabled && (effectiveTokenLen === 0 || chat_id.length === 0)) {
     fail(section, "Token and chat id are required to enable Telegram");
   }
 

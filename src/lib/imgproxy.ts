@@ -417,15 +417,21 @@ export async function warmImgproxyVariants(
       const url = urls[idx];
       try {
         // We request the AVIF/WEBP-preferred Accept so imgproxy caches the
-        // exact bytes the browser will ask for. `keepalive` lets us drop the
-        // process on the caller side without aborting in-flight fetches.
+        // exact bytes the browser will ask for. F13: a 5 s per-fetch
+        // timeout keeps a wedged imgproxy from holding the worker
+        // indefinitely; finalize's `void warmImgproxyVariants(...)` would
+        // otherwise pile up unbounded outstanding fetches.
+        const timeoutSignal = AbortSignal.timeout(5_000);
+        const signal = options.signal
+          ? AbortSignal.any([options.signal, timeoutSignal])
+          : timeoutSignal;
         const res = await fetch(url, {
           method: "GET",
           headers: {
             accept: "image/avif,image/webp,image/*;q=0.8",
             "user-agent": "gallery-hub-warmer/1",
           },
-          signal: options.signal,
+          signal,
         });
         // Drain the body so connection/keepalive accounting completes — imgproxy
         // returns 200 with the full encoded image; not reading the body would

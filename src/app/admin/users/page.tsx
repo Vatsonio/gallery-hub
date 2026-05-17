@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { Users as UsersIcon, Plus, Pencil, Power, Trash2 } from "lucide-react";
-import { requireOwner, getAdminSession } from "@/lib/session";
+import { requireOwner } from "@/lib/auth-check";
+import { getAdminSession } from "@/lib/session";
 import { listUsers, type AdminUser } from "@/lib/users";
 import { updateUserAction, deleteUserAction } from "./_actions";
 import { FlashToasts } from "./_flash";

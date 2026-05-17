@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import PostHogProvider from "@/components/PostHogProvider";
 import { VIEWER_COOKIE } from "@/lib/viewer";
-import { requireAdminSessionFromCookies } from "@/lib/session";
+import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 
 export const dynamic = "force-dynamic";
 

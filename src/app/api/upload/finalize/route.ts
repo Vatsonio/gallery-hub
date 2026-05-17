@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/auth-check";
 import { getAlbumById, insertPhotosBatch } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
@@ -7,6 +7,8 @@ import { isSameOrigin } from "@/lib/same-origin";
 import { sanitizeFilename } from "@/lib/sanitize";
 import { notifyNewUpload } from "@/lib/notifications";
 import { isImgproxyEnabled, warmImgproxyVariants } from "@/lib/imgproxy";
+import { loadSettings } from "@/lib/settings";
+import { sql } from "@/lib/db";
 import type { FinalizeRequestBody, FinalizeResponse, GenerateDerivativesJobData } from "@/lib/types";
 
 function inferExt(filename: string): string {
@@ -35,6 +37,24 @@ export async function POST(req: Request): Promise<Response> {
 
   const album = await getAlbumById(body.album_id);
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
+
+  // F4: enforce settings.uploads.max_files_per_album against the live
+  // count + the incoming batch. The presign cap blocks at presign time;
+  // a second admin client running concurrently could still push past
+  // the limit between presign and finalize, so we re-check here.
+  const settings = await loadSettings();
+  const countRows = await sql<{ n: string }[]>`
+    SELECT COUNT(*)::text AS n FROM photos WHERE album_id = ${album.id}
+  `;
+  const currentCount = Number(countRows[0]?.n ?? "0");
+  if (currentCount + body.photos.length > settings.uploads.max_files_per_album) {
+    return NextResponse.json(
+      {
+        error: `album would exceed max files (${settings.uploads.max_files_per_album})`,
+      },
+      { status: 400 },
+    );
+  }
 
   const boss = await getBoss();
 
