@@ -15,9 +15,17 @@ export async function seedAdmin(opts: SeedAdminOptions): Promise<void> {
   const sql = postgres(opts.databaseUrl, { max: 1 });
   try {
     const passwordHash = await hashPassword(opts.password);
+    // On a fresh DB the migrations/018 backfill is a no-op (no rows to
+    // promote). Promote this row to 'owner' when no owner exists yet so
+    // /admin/users, /admin/settings, /admin/metrics are reachable on first
+    // boot. Re-runs are password-reset only — role stays 'admin'.
     await sql`
-      INSERT INTO admin_users (email, password_hash)
-      VALUES (${opts.email}, ${passwordHash})
+      INSERT INTO admin_users (email, password_hash, role)
+      VALUES (
+        ${opts.email},
+        ${passwordHash},
+        COALESCE((SELECT 'admin' FROM admin_users WHERE role = 'owner' LIMIT 1), 'owner')
+      )
       ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
     `;
     log(`[seed-admin] upserted admin ${opts.email}`);
