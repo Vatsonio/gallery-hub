@@ -63,14 +63,11 @@ export async function GET(
   const jar = await cookies();
   const unlocked = jar.get(unlockCookieName(token))?.value ?? null;
   const status = await resolveShareLinkStatus(token, unlocked);
-  if (status.kind === "not_found") {
+  // F9: viewer-layer only needs "I can render" vs "I can't". Collapse
+  // not_found / expired / locked into one 404 with a generic body so an
+  // attacker with a half-leaked token can't fingerprint its state pre-auth.
+  if (status.kind !== "ok") {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
-  }
-  if (status.kind === "expired") {
-    return NextResponse.json({ error: "expired" }, { status: 410 });
-  }
-  if (status.kind === "locked") {
-    return NextResponse.json({ error: "locked" }, { status: 401 });
   }
 
   const album = await getAlbumById(status.link.album_id);
@@ -92,18 +89,11 @@ export async function GET(
   ]);
 
   if (viewerId !== ADMIN_PREVIEW_VIEWER_ID) {
-    // View dedup: 30-min window per (token, viewer). Notifications fire only
-    // on the *first ever* page_view for a token — we count before insert so
-    // the dedup check doesn't race against itself.
-    const priorViews = await sql<{ n: string }[]>`
-      SELECT COUNT(*)::text AS n
-        FROM view_events
-       WHERE share_token = ${token}
-         AND event_type = 'page_view'
-    `.catch(() => [{ n: "1" }] as { n: string }[]);
-    const isFirstView = Number(priorViews[0]?.n ?? "0") === 0;
-
-    await sql`
+    // View dedup: 30-min window per (token, viewer). F7: the prior code
+    // SELECT-then-INSERT raced — two simultaneous first viewers both saw
+    // prior=0 and both fired notifyFirstShareView. Insert first, then
+    // ask "am I the only row?" so the DB serialises the decision.
+    const inserted = await sql<{ id: number }[]>`
       INSERT INTO view_events (share_token, viewer_id, event_type)
       SELECT ${token}, ${viewerId}, 'page_view'
        WHERE NOT EXISTS (
@@ -113,7 +103,18 @@ export async function GET(
             AND event_type = 'page_view'
             AND created_at > NOW() - INTERVAL '30 minutes'
        )
-    `.catch(() => undefined);
+      RETURNING id
+    `.catch(() => [] as { id: number }[]);
+    let isFirstView = false;
+    if (inserted.length > 0) {
+      const cntRows = await sql<{ n: string }[]>`
+        SELECT COUNT(*)::text AS n
+          FROM view_events
+         WHERE share_token = ${token}
+           AND event_type = 'page_view'
+      `.catch(() => [{ n: "0" }] as { n: string }[]);
+      isFirstView = Number(cntRows[0]?.n ?? "0") === 1;
+    }
 
     safeCapture({
       distinctId: viewerId,
