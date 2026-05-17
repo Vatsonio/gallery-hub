@@ -8,7 +8,7 @@ REM   perf honestly:
 REM     - dev mode pays a per-route compile tax on every cold
 REM       navigation (~1-2 s extra on the share page),
 REM     - dev mode disables React minification + server-side
-RM        compression,
+REM       compression,
 REM     - dev mode uses HTTP/1.1 keep-alive defaults (no HMR
 REM       coalescing) that inflate TTFB by ~100 ms.
 REM
