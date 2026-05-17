@@ -133,11 +133,11 @@ export async function GET(
       });
     }
 
-    const sourceIp =
-      h.get("cf-connecting-ip") ??
-      h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-      "";
-    if (sourceIp) {
+    // F3: use the gated resolver — raw XFF lets an attacker either
+    // evade the suspicious-IP tally (rotating XFF) or frame a victim
+    // (fixed XFF) when TRUST_PROXY_HEADERS isn't set.
+    const sourceIp = resolveIpFromHeaders(h);
+    if (sourceIp !== "unknown") {
       void recordIpTokenHit(sourceIp, token);
     }
   }
