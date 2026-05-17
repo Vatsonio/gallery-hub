@@ -96,7 +96,7 @@ services:
   # One-shot DB migrations. Exits 0 on success — depended on by app & worker.
   # ──────────────────────────────────────────────────────────────────────────
   gallery-migrate:
-    image: ${GALLERY_APP_IMAGE:-ghcr.io/divass/gallery-hub:latest}
+    image: ${GALLERY_APP_IMAGE:-ghcr.io/vatsonio/gallery-hub:latest}
     container_name: gallery-migrate
     restart: "no"
     command: ["npx", "tsx", "scripts/migrate.ts"]
@@ -119,7 +119,7 @@ services:
   # Gallery Next.js app
   # ──────────────────────────────────────────────────────────────────────────
   gallery-app:
-    image: ${GALLERY_APP_IMAGE:-ghcr.io/divass/gallery-hub:latest}
+    image: ${GALLERY_APP_IMAGE:-ghcr.io/vatsonio/gallery-hub:latest}
     container_name: gallery-app
     restart: unless-stopped
     environment:
@@ -173,7 +173,7 @@ services:
   # pg-boss worker — derivatives, reapers, etc.
   # ──────────────────────────────────────────────────────────────────────────
   gallery-worker:
-    image: ${GALLERY_WORKER_IMAGE:-ghcr.io/divass/gallery-hub-worker:latest}
+    image: ${GALLERY_WORKER_IMAGE:-ghcr.io/vatsonio/gallery-hub-worker:latest}
     container_name: gallery-worker
     restart: unless-stopped
     environment:
@@ -409,7 +409,7 @@ services:
     build:
       context: .
       dockerfile: deploy/backup/Dockerfile
-    image: ${GALLERY_BACKUP_IMAGE:-gallery-hub-backup:local}
+    image: ${GALLERY_BACKUP_IMAGE:-ghcr.io/vatsonio/gallery-hub-backup:latest}
     container_name: gallery-backup
     restart: unless-stopped
     environment:
@@ -450,7 +450,7 @@ services:
     build:
       context: .
       dockerfile: deploy/backup/Dockerfile
-    image: ${GALLERY_BACKUP_IMAGE:-gallery-hub-backup:local}
+    image: ${GALLERY_BACKUP_IMAGE:-ghcr.io/vatsonio/gallery-hub-backup:latest}
     container_name: gallery-mirror
     restart: unless-stopped
     environment:
