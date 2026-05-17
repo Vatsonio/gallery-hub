@@ -416,12 +416,15 @@ export async function warmImgproxyVariants(
       const idx = cursor++;
       const url = urls[idx];
       try {
-        // We request the AVIF/WEBP-preferred Accept so imgproxy caches the
-        // exact bytes the browser will ask for. F13: a 5 s per-fetch
-        // timeout keeps a wedged imgproxy from holding the worker
-        // indefinitely; finalize's `void warmImgproxyVariants(...)` would
-        // otherwise pile up unbounded outstanding fetches.
-        const timeoutSignal = AbortSignal.timeout(5_000);
+        // 30 s per-fetch timeout. Cold-cache imgproxy on a fresh upload can
+        // legitimately take 5–10 s per photo (libvips decode + AVIF encode
+        // chained), so a tighter cap drops the warm-fetch entirely and the
+        // first real viewer pays the full cost anyway. The point of the
+        // timeout is only to keep a wedged imgproxy from holding workers
+        // forever — 30 s catches that case without false positives on a
+        // healthy-but-busy box. Override via warm-fetch's signal arg for
+        // tests or aggressive deploys.
+        const timeoutSignal = AbortSignal.timeout(30_000);
         const signal = options.signal
           ? AbortSignal.any([options.signal, timeoutSignal])
           : timeoutSignal;
@@ -433,14 +436,17 @@ export async function warmImgproxyVariants(
           },
           signal,
         });
-        // Drain the body so connection/keepalive accounting completes — imgproxy
-        // returns 200 with the full encoded image; not reading the body would
-        // leave the socket half-open.
+        // Drain the body so connection/keepalive accounting completes —
+        // imgproxy returns 200 with the full encoded image; not reading
+        // the body leaves the socket half-open.
         await res.arrayBuffer().catch(() => undefined);
       } catch (err) {
-        // Warming is best-effort; an aborted/timed-out fetch is a no-op for
-        // the user. Only emit at debug-ish level to avoid log spam at scale.
-        if ((err as { name?: string }).name !== "AbortError") {
+        // Warming is best-effort; an aborted/timed-out fetch is a no-op
+        // for the user. AbortSignal.timeout fires DOMException with name
+        // "TimeoutError" in Node 22; older runtimes emit "AbortError".
+        // Either way — silence (the first real viewer pays the cost).
+        const name = (err as { name?: string }).name;
+        if (name !== "AbortError" && name !== "TimeoutError") {
           // eslint-disable-next-line no-console
           console.warn("[imgproxy-warm] fetch failed:", url, (err as Error).message);
         }
