@@ -152,7 +152,13 @@ export async function GET(
     );
   }
 
-  // Viewer id (set if missing — page would normally have done this).
+  // Viewer id. The page-render middleware mints this cookie at path "/"
+  // before any /a/{token} traffic, so by the time the user clicks Download
+  // the cookie is always present. We still fall back to a fresh UUID for
+  // direct API hits (curl, share-link forwarded straight to /api/export)
+  // but write the new cookie at path "/" — the previous code wrote at
+  // /a/{token}, which orphaned the viewer's favorites because the browser
+  // wouldn't send that cookie back to /api/export on the next call.
   let viewerId = jar.get(VIEWER_COOKIE)?.value ?? "";
   if (!viewerId) {
     viewerId = randomUUID();
@@ -160,7 +166,7 @@ export async function GET(
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
-      path: `/a/${token}`,
+      path: "/",
       maxAge: 60 * 60 * 24 * 365,
     });
   }

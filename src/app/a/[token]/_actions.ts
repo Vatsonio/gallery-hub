@@ -64,7 +64,10 @@ export async function toggleFavorite(
 
   // Inline cookie issuance (resolveViewerId helper uses a sync jar shape
   // that doesn't line up cleanly with the next/headers cookie store
-  // typing, so we replicate its logic explicitly here).
+  // typing, so we replicate its logic explicitly here). Cookie path is
+  // "/" so the same UUID is sent to /api/export/{token} — otherwise the
+  // export route would mint a replacement and orphan the viewer's
+  // favorites.
   let viewerId = jar.get(VIEWER_COOKIE)?.value ?? null;
   if (!viewerId) {
     viewerId = randomUUID();
@@ -72,7 +75,7 @@ export async function toggleFavorite(
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
-      path: `/a/${token}`,
+      path: "/",
       maxAge: 60 * 60 * 24 * 365,
     });
   }
