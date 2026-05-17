@@ -10,10 +10,19 @@ import { createRateLimiter } from "@/lib/rateLimiter";
 import { safeCapture } from "@/lib/analytics";
 import { resolveIpFromHeaders } from "@/lib/client-ip";
 
-type AdminRow = { id: string; email: string; password_hash: string };
+type AdminRow = {
+  id: string;
+  email: string;
+  password_hash: string;
+  role: "owner" | "admin";
+  disabled_at: string | null;
+};
 
 export type AuthResult =
-  | { ok: true; user: { id: string; email: string } }
+  | {
+      ok: true;
+      user: { id: string; email: string; role: "owner" | "admin" };
+    }
   | { ok: false; error: string };
 
 // Soft block: 10 attempts per email (case-folded) per 60s. Defends against
@@ -56,7 +65,8 @@ function getDummyHash(): Promise<string> {
 
 export async function authenticate(email: string, password: string): Promise<AuthResult> {
   const rows = await sql<AdminRow[]>`
-    SELECT id, email, password_hash FROM admin_users WHERE email = ${email} LIMIT 1
+    SELECT id, email, password_hash, role, disabled_at::text AS disabled_at
+      FROM admin_users WHERE email = ${email} LIMIT 1
   `;
   if (rows.length === 0) {
     // Burn an argon2 verify against a fixed dummy hash so the no-user branch
@@ -68,7 +78,16 @@ export async function authenticate(email: string, password: string): Promise<Aut
   const row = rows[0];
   const valid = await verifyPassword(row.password_hash, password);
   if (!valid) return { ok: false, error: GENERIC_ERROR };
-  return { ok: true, user: { id: row.id, email: row.email } };
+  // Disabled accounts get the same generic error as bad creds. We still
+  // ran verifyPassword (no timing tell) so an attacker can't distinguish
+  // "disabled" from "wrong password" from "no such email".
+  if (row.disabled_at !== null) {
+    return { ok: false, error: GENERIC_ERROR };
+  }
+  // Side-effect: refresh last_login_at for the user-management table.
+  await sql`UPDATE admin_users SET last_login_at = now() WHERE id = ${row.id}`
+    .catch(() => undefined);
+  return { ok: true, user: { id: row.id, email: row.email, role: row.role } };
 }
 
 /**
@@ -129,6 +148,7 @@ export async function loginAction(formData: FormData): Promise<void> {
   const session = await getAdminSession();
   session.userId = result.user.id;
   session.email = result.user.email;
+  session.role = result.user.role;
   await session.save();
   redirect(next.startsWith("/admin") ? next : "/admin/albums");
 }

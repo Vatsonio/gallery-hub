@@ -26,8 +26,6 @@ async function mintViewerCookieIfNeeded(req: NextRequest, res: NextResponse): Pr
   if (!m) return;
   // Only mint for browser navigations. Don't touch RSC / data prefetch traffic.
   if (req.method !== "GET") return;
-  const existing = req.cookies.get(VIEWER_COOKIE)?.value;
-  if (existing) return;
 
   // Admin previews must never persist a viewer cookie — the page detects the
   // admin session and uses the ADMIN_PREVIEW_VIEWER_ID instead. We verify the
@@ -36,16 +34,28 @@ async function mintViewerCookieIfNeeded(req: NextRequest, res: NextResponse): Pr
   const adminSession = await getIronSession<AdminSession>(req, res, sessionOptions);
   if (adminSession.userId) return;
 
-  const token = m[1];
-  const id = crypto.randomUUID();
+  void m;
+  // Always re-set the cookie at path "/". Two reasons:
+  //   1. Mint a fresh UUID if the viewer hasn't been here before.
+  //   2. Migrate any legacy cookie that was scoped to path "/a/{token}"
+  //      (pre-2026-05 deployment) onto the wider path so /api/export/...
+  //      can read it. Without this migration the first /api/export call
+  //      would not receive the cookie, the route would mint a
+  //      *replacement* UUID, and the viewer's existing favorites would
+  //      be orphaned the moment they clicked "Download".
+  // The (share_token, viewer_id) pair already scopes favorites per album,
+  // so widening the cookie path doesn't cross-correlate viewers.
+  const existing = req.cookies.get(VIEWER_COOKIE)?.value;
+  const id = existing && existing.length > 0 ? existing : crypto.randomUUID();
   res.cookies.set(VIEWER_COOKIE, id, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: `/a/${token}`,
+    path: "/",
     maxAge: 60 * 60 * 24 * 365,
   });
-  // Also reflect into the request so the page-render reads the same id.
+  // Reflect into the request so the page-render reads the same id even
+  // before the browser round-trips the new Set-Cookie.
   req.cookies.set(VIEWER_COOKIE, id);
 }
 
@@ -66,6 +76,11 @@ export async function middleware(req: NextRequest) {
 
   // Public share routes: ensure gh_viewer cookie exists (skipped for admin previews).
   if (PUBLIC_SHARE_RE.test(pathname)) {
+    // TODO: gate public share routes on the `maintenance.enabled` app_setting.
+    // When set, return a maintenance page (or 503) instead of running the
+    // viewer-cookie mint + page render. Reading app_settings from the Edge
+    // runtime needs either a cached lookup outside postgres.js or a sync
+    // signal pushed in at deploy time — out of scope for the settings page.
     const res = NextResponse.next({ request: { headers: req.headers } });
     await mintViewerCookieIfNeeded(req, res);
     return res;

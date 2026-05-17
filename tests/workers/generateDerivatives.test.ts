@@ -23,9 +23,9 @@ beforeAll(async () => {
   await ensureBucket();
 }, 120_000);
 
-describe("handleGenerateDerivatives", () => {
+describe("handleGenerateDerivatives (imgproxy era)", () => {
   it.skipIf(process.env.SKIP_TESTCONTAINERS === "1")(
-    "produces WEBP thumb/web/large + AVIF web/large and flips status to ready",
+    "writes metadata-only (dimensions, taken_at, thumbhash, status=ready) and does NOT produce variant blobs",
     async () => {
       const album = await createAlbum({
         title: "Worker Test",
@@ -36,9 +36,11 @@ describe("handleGenerateDerivatives", () => {
       await insertPhoto({
         id: photoId,
         album_id: album.id,
+        // Width/height intentionally wrong — worker must overwrite with
+        // sharp-verified dimensions.
         filename: "x.jpg",
-        width: 2000,
-        height: 1500,
+        width: 1,
+        height: 1,
         orig_bytes: 1,
         taken_at: null
       });
@@ -58,15 +60,22 @@ describe("handleGenerateDerivatives", () => {
         key
       });
 
-      expect(await objectExists(variantKey(album.id, photoId, "thumb"))).toBe(true);
-      expect(await objectExists(variantKey(album.id, photoId, "web"))).toBe(true);
-      expect(await objectExists(variantKey(album.id, photoId, "large"))).toBe(true);
-      expect(await objectExists(avifVariantKey(album.id, photoId, "web"))).toBe(true);
-      expect(await objectExists(avifVariantKey(album.id, photoId, "large"))).toBe(true);
-
+      // Hot-path correctness — every metadata field set + status flipped.
       const photos = await listPhotos(album.id);
       const photo = photos.find((p) => p.id === photoId);
       expect(photo?.status).toBe("ready");
+      expect(photo?.width).toBe(2000);
+      expect(photo?.height).toBe(1500);
+      expect(photo?.thumbhash).toBeTruthy();
+      expect(photo?.thumbhash?.length).toBeGreaterThan(10);
+
+      // Variants must NOT have been written — imgproxy resizes on demand
+      // from the original. The worker is metadata-only now.
+      expect(await objectExists(variantKey(album.id, photoId, "thumb"))).toBe(false);
+      expect(await objectExists(variantKey(album.id, photoId, "web"))).toBe(false);
+      expect(await objectExists(variantKey(album.id, photoId, "large"))).toBe(false);
+      expect(await objectExists(avifVariantKey(album.id, photoId, "web"))).toBe(false);
+      expect(await objectExists(avifVariantKey(album.id, photoId, "large"))).toBe(false);
     },
     120_000
   );

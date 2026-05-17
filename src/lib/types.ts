@@ -46,12 +46,43 @@ export interface PhotoRow {
   taken_at: string | null;
   status: PhotoStatus;
   created_at: string;
+  /**
+   * Last byte-content mutation. Bumped on photo create (worker derivatives
+   * pass) and on photo-edit (rotate/crop/brightness). Used as the `version`
+   * input to buildImgproxyUrl so the imgproxy cache invalidates without a
+   * manual PURGE when an admin edits a photo. See migrations/015.
+   */
+  updated_at: string;
   /** Base64-encoded ThumbHash placeholder, null until the worker fills it in. */
   thumbhash?: string | null;
   /** Byte size of the AVIF mirror of the web variant; null when absent. */
   avif_bytes_web?: number | null;
   /** Byte size of the AVIF mirror of the large variant; null when absent. */
   avif_bytes_large?: number | null;
+  /** JSONB-packed EXIF metadata captured at upload (see PhotoExif). */
+  exif?: PhotoExif | null;
+}
+
+/**
+ * Subset of EXIF metadata persisted onto each photo. Filled by
+ * `readPhotoExif` during upload finalize; older photos may have NULL.
+ *
+ * All fields are nullable individually — a phone-camera JPEG may have
+ * camera but no lens, or shutter but no focal length. The lightbox
+ * displays only the fields that are present.
+ */
+export interface PhotoExif {
+  camera?: string | null;
+  lens?: string | null;
+  iso?: number | null;
+  /** F-number (e.g. 1.8). */
+  aperture?: number | null;
+  /** Pre-formatted shutter fraction (e.g. "1/200"). */
+  shutter?: string | null;
+  /** Focal length in millimetres. */
+  focal_mm?: number | null;
+  /** ISO timestamp of capture — duplicates photos.taken_at for the lightbox panel. */
+  taken_at?: string | null;
 }
 
 export interface AlbumRow {

@@ -6,6 +6,9 @@ import HeartBurst from "./HeartBurst";
 import HeartOverlay from "./HeartOverlay";
 import { toggleFavorite } from "@/app/a/[token]/_actions";
 import { startViewTransition, setViewTransitionName } from "@/lib/view-transition";
+import { usePhotoLoadProgress } from "./PageLoadProgress";
+import { useFavoritesCount } from "./FavoritesCount";
+import { useFavoritedIds, useFavoritedIdsActions } from "./FavoritedIds";
 
 interface Props {
   token: string;
@@ -18,6 +21,19 @@ interface Props {
    * bytes; everywhere else falls back to webUrl automatically.
    */
   avifUrl?: string | null;
+  /**
+   * Optional responsive srcSet (`"<url> 400w, <url> 800w, <url> 1600w"`).
+   * When present the browser picks the most appropriate width for the
+   * actual layout box × DPR — mobile saves ~75% bytes vs always shipping
+   * 1600w. Pair with `sizes` (defaults to the tile's CSS width).
+   */
+  srcSet?: string | null;
+  /**
+   * `sizes` attribute hint for srcSet matching. Defaults to a sensible
+   * approximation of justified-row tile widths — pass an override at
+   * the call site when the layout shape is different (e.g. selections).
+   */
+  sizes?: string;
   /** flex-basis style for justified-row layout. */
   flexStyle: React.CSSProperties;
   initialFavorited: boolean;
@@ -26,11 +42,25 @@ interface Props {
   /** Visual size: justified-row tiles use object-cover. */
   className?: string;
   /**
-   * Hint the browser this tile is above-the-fold and should be fetched
-   * eagerly. Applies fetchPriority="high" + decoding="sync" + drops
-   * loading="lazy". Reserve for the first row of the grid.
+   * Loading hint. Maps to the three combinations the gallery actually
+   * uses:
+   *
+   *   - `"high"` — above-the-fold tile. fetchPriority=high, loading=eager,
+   *     decoding=sync. Reserve for the first ~32 tiles.
+   *   - `"low"`  — below-the-fold tile, but still eager: fetchPriority=low,
+   *     loading=eager, decoding=async. The browser starts the request
+   *     immediately, but queues it behind high-priority work. By the time
+   *     the user scrolls, the tile is already painted. Costs no extra
+   *     bandwidth on a viewer who scrolls anyway; the only cost is that
+   *     a viewer who never scrolls below the fold paid for the bytes.
+   *   - `"lazy"` — opt-out for hidden / off-route consumers. Only registers
+   *     with the page-load progress when explicitly above-the-fold.
+   *
+   * Defaults to `"lazy"` so any unaudited callsite keeps the old
+   * memory-friendly behavior. The share-page renderer always passes an
+   * explicit value.
    */
-  priority?: boolean;
+  priority?: "high" | "low" | "lazy";
   /**
    * Pre-decoded ThumbHash PNG (as a data: URL). Rendered behind the
    * real image and faded out via onLoad so users see a blurry preview
@@ -59,13 +89,37 @@ export default function PhotoTile({
   href,
   webUrl,
   avifUrl,
+  srcSet,
+  // Default sizes hint: ~50vw at the mobile breakpoint (2 photos per row),
+  // ~33vw on tablets, ~25vw on desktop. Conservative enough that the
+  // browser doesn't downshift below the actual rendered width on retina
+  // displays; aggressive enough that the 400w variant gets selected on
+  // small viewports.
+  sizes = "(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw",
   flexStyle,
   initialFavorited,
   index = 0,
   className,
-  priority = false,
+  priority = "lazy",
   thumbhashDataUrl,
 }: Props) {
+  // Only above-the-fold tiles ("high") count toward the page-splash /
+  // progress bar critical-render set. Below-the-fold tiles ("low") still
+  // download eagerly so they're ready when the user scrolls, but their
+  // load timing must not gate the splash dismiss — we'd be holding the
+  // splash for tiles the user can't see.
+  const isAboveFold = priority === "high";
+  // Browser hints — see the Props.priority docblock for the matrix.
+  //
+  // IMPORTANT: cover hero is the ONLY resource on the page tagged
+  // fetchPriority="high". Grid tiles — even above-the-fold — get "low"
+  // so the cover wins the HTTP/1.1 6-per-origin connection race. Tiles
+  // still load eagerly (no waiting for scroll); they just yield slot 1
+  // to the cover. Without this, the cover competes with 32 high-prio
+  // tiles and arrives several seconds late.
+  const loadingHint = priority === "lazy" ? "lazy" : "eager";
+  const decodingHint = priority === "high" ? "async" : "async";
+  const fetchPriorityHint = priority === "lazy" ? "auto" : "low";
   const router = useRouter();
   const [favorited, setFavorited] = useState(initialFavorited);
   const [burst, setBurst] = useState(0);
@@ -74,13 +128,70 @@ export default function PhotoTile({
   const inflight = useRef(false);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
+  // Live favorites badge — bumped optimistically on each tap, reconciled
+  // with the server response below. `bump` is stable across renders so
+  // it's safe to call from inside commitToggle without re-running effects.
+  const { bump: bumpFavoritesCount } = useFavoritesCount();
+  // Favorited-ids set hydrated by the dynamic viewer island (PPR). Until
+  // the island lands, `favoritedIds` is null and the tile keeps whatever
+  // initialFavorited was rendered into the static shell (false on prerender,
+  // true on per-request SSR fallback). After hydration we mirror the set.
+  const favoritedIds = useFavoritedIds();
+  const { toggle: toggleFavoritedId } = useFavoritedIdsActions();
+  useEffect(() => {
+    if (favoritedIds === null) return;
+    const next = favoritedIds.has(photoId);
+    setFavorited((cur) => (cur === next ? cur : next));
+  }, [favoritedIds, photoId]);
   const imgRef = useRef<HTMLImageElement>(null);
+  // Only above-the-fold tiles register with the page-load progress bar.
+  // Lazy tiles further down may never enter the viewport, which would
+  // freeze the bar below 100% indefinitely.
+  const progress = usePhotoLoadProgress();
+  const reportedRef = useRef(false);
 
   useEffect(() => {
     return () => {
       if (pendingNavTimer.current) clearTimeout(pendingNavTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (isAboveFold) progress.register();
+    // Cached-image race: when the browser already has the image in
+    // memory/disk cache, the <img> can be `.complete === true` before
+    // React attaches the onLoad listener. The onLoad event never fires,
+    // the resolved counter never increments, the opacity transition
+    // never runs, and the tile stays invisible behind the thumbhash.
+    // We flip `loaded` for every tile (above-fold or not) and additionally
+    // report progress for above-the-fold tiles. We don't gate on
+    // `naturalWidth > 0` because a cached 404 still counts as resolved
+    // (matches the onError path below).
+    const el = imgRef.current;
+    if (el && el.complete && !reportedRef.current) {
+      reportedRef.current = true;
+      setLoaded(true);
+      if (isAboveFold) progress.reportLoaded();
+    }
+    // `register` and `reportLoaded` come from a stable useMemo in the
+    // provider — re-running this effect on identity churn would
+    // double-count, so we intentionally pass an empty dep array. The
+    // provider api is referentially stable for the page lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Single shared callback for onLoad/onError so a broken URL still
+  // increments the resolved counter — otherwise one 404 would freeze
+  // the bar. Also guarded with reportedRef so the cached-image fast
+  // path in the mount effect above cannot double-count when a delayed
+  // onLoad fires later in the same tick.
+  function onImgResolved(): void {
+    setLoaded(true);
+    if (!isAboveFold) return;
+    if (reportedRef.current) return;
+    reportedRef.current = true;
+    progress.reportLoaded();
+  }
 
   function cancelPendingNav(): void {
     if (pendingNavTimer.current) {
@@ -120,7 +231,11 @@ export default function PhotoTile({
 
   function commitToggle(intent: boolean): void {
     // Optimistic update; reconcile with server response.
+    const prev = favorited;
+    const shownDelta = intent === prev ? 0 : intent ? 1 : -1;
     setFavorited(intent);
+    toggleFavoritedId(photoId, intent);
+    if (shownDelta !== 0) bumpFavoritesCount(shownDelta);
     if (intent) setBurst((b) => b + 1);
     if (inflight.current) return;
     inflight.current = true;
@@ -128,8 +243,16 @@ export default function PhotoTile({
       try {
         const res = await toggleFavorite(token, photoId);
         setFavorited(res.favorited);
+        toggleFavoritedId(photoId, res.favorited);
+        // Reconcile against the optimistic display. `truthDelta` is what
+        // the count *should* have moved by from `prev`; if it disagrees
+        // with the optimistic `shownDelta`, apply the difference.
+        const truthDelta = res.favorited === prev ? 0 : res.favorited ? 1 : -1;
+        if (truthDelta !== shownDelta) bumpFavoritesCount(truthDelta - shownDelta);
       } catch {
-        setFavorited(!intent);
+        setFavorited(prev);
+        toggleFavoritedId(photoId, prev);
+        if (shownDelta !== 0) bumpFavoritesCount(-shownDelta);
       } finally {
         inflight.current = false;
       }
@@ -219,13 +342,16 @@ export default function PhotoTile({
         <img
           ref={imgRef}
           src={webUrl}
+          srcSet={srcSet ?? undefined}
+          sizes={srcSet ? sizes : undefined}
           alt=""
-          loading={priority ? "eager" : "lazy"}
-          decoding={priority ? "sync" : "async"}
-          fetchPriority={priority ? "high" : "auto"}
+          loading={loadingHint}
+          decoding={decodingHint}
+          fetchPriority={fetchPriorityHint}
           draggable={false}
-          onLoad={() => setLoaded(true)}
-          className={`relative h-full w-full object-cover transition-transform duration-500 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
+          onLoad={onImgResolved}
+          onError={onImgResolved}
+          className={`relative h-full w-full object-cover transition-[opacity,transform] duration-300 ease-out sm:group-hover:scale-[1.04] ${thumbhashDataUrl && !loaded ? "opacity-0" : "opacity-100"}`}
         />
       </picture>
       <HeartBurst trigger={burst} />

@@ -1,6 +1,7 @@
 import { sql } from "@/lib/db";
-import { getPresignedUrl } from "@/lib/minio";
-import { variantKey } from "@/lib/keys";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import {
   groupFavoriteEvents,
   type GroupedSelection,
@@ -103,27 +104,41 @@ export async function loadWidgetSummary(baseUrl: string): Promise<WidgetSummary>
     LIMIT 5
   `;
 
-  const recent_albums: WidgetRecentAlbum[] = await Promise.all(
-    albums.map(async (a) => {
-      let cover_url: string | null = null;
-      if (a.cover_photo_id) {
-        // 1h presigned URL — within the revalidate window of any sane
-        // consumer, so we don't pay the round-trip cost on every render.
-        cover_url = await getPresignedUrl(variantKey(a.id, a.cover_photo_id, "web"), 3600);
+  // Resolve cover photos' filenames + updated_at in one batch so we can
+  // build the imgproxy URLs without N+1 round-trips.
+  const coverIds = albums.map((a) => a.cover_photo_id).filter((id): id is string => id !== null);
+  type CoverRow = { id: string; filename: string; updated_at: Date };
+  const coverPhotos = coverIds.length
+    ? await sql<CoverRow[]>`SELECT id, filename, updated_at FROM photos WHERE id IN ${sql(coverIds)}`
+    : [];
+  const coverMap = new Map(coverPhotos.map((c) => [c.id, c]));
+
+  const recent_albums: WidgetRecentAlbum[] = albums.map((a) => {
+    let cover_url: string | null = null;
+    if (a.cover_photo_id) {
+      const cover = coverMap.get(a.cover_photo_id);
+      if (cover) {
+        // imgproxy URLs are content-addressed by signature, so cache-friendly
+        // even without explicit revalidation windows. version=updated_at
+        // invalidates on photo-edit; otherwise the URL is stable forever.
+        cover_url = imgproxyWeb(
+          originalKey(a.id, cover.id, resolveOriginalExt(cover.filename)),
+          { version: photoVersionSeed(cover.updated_at) },
+        );
       }
-      return {
-        title: a.title,
-        subtitle: a.subtitle,
-        cover_url,
-        photo_count: n(a.photo_count),
-        favorite_count: n(a.favorite_count),
-        view_count: n(a.view_count),
-        share_url: a.token ? `${baseUrl}/a/${a.token}` : null,
-        status: a.status,
-        updated_at: a.updated_at.toISOString(),
-      };
-    }),
-  );
+    }
+    return {
+      title: a.title,
+      subtitle: a.subtitle,
+      cover_url,
+      photo_count: n(a.photo_count),
+      favorite_count: n(a.favorite_count),
+      view_count: n(a.view_count),
+      share_url: a.token ? `${baseUrl}/a/${a.token}` : null,
+      status: a.status,
+      updated_at: a.updated_at.toISOString(),
+    };
+  });
 
   const rawEvents = await sql<RawFavoriteEvent[]>`
     SELECT v.share_token, v.viewer_id, v.created_at, a.title AS album_title
@@ -236,17 +251,55 @@ export async function loadInsightsStats(): Promise<InsightsStats> {
 }
 
 /**
- * 30-day daily views trend. Returns one entry per day with at least one
- * page_view; missing days are NOT zero-filled — the sparkline renderer
- * fills them client-side from the date range. Keeps the SQL simple and
- * lets the renderer decide the gap-handling story.
+ * Period switcher input for /chikaq. Values map to whole-day windows; "all"
+ * skips the date filter entirely (use cautiously — view_events on a busy
+ * site can be in the millions).
  */
-export async function loadViewsTrend30d(): Promise<ViewsTrendPoint[]> {
+export type ChikaqPeriod = "7d" | "30d" | "90d" | "all";
+
+export function periodToDays(p: ChikaqPeriod): number | null {
+  switch (p) {
+    case "7d": return 7;
+    case "30d": return 30;
+    case "90d": return 90;
+    case "all": return null;
+  }
+}
+
+/** Parse a URL search-params value into a valid ChikaqPeriod. Falls back to 30d. */
+export function parseChikaqPeriod(raw: string | null | undefined): ChikaqPeriod {
+  if (raw === "7d" || raw === "30d" || raw === "90d" || raw === "all") return raw;
+  return "30d";
+}
+
+/**
+ * Daily views trend over the given period. Returns one entry per day with
+ * at least one page_view; missing days are NOT zero-filled — the sparkline
+ * renderer fills them client-side from the date range. Keeps the SQL
+ * simple and lets the renderer decide the gap-handling story.
+ *
+ * `days=null` means "all time" (no date filter).
+ */
+export async function loadViewsTrend(days: number | null = 30): Promise<ViewsTrendPoint[]> {
+  if (days === null) {
+    const rows = await sql<TrendRow[]>`
+      SELECT date_trunc('day', created_at)::date AS day,
+             COUNT(*)::bigint AS views
+        FROM view_events
+       WHERE event_type = 'page_view'
+       GROUP BY 1
+       ORDER BY 1 ASC
+    `;
+    return rows.map((r) => ({
+      day: (r.day instanceof Date ? r.day : new Date(r.day)).toISOString().slice(0, 10),
+      views: n(r.views),
+    }));
+  }
   const rows = await sql<TrendRow[]>`
     SELECT date_trunc('day', created_at)::date AS day,
            COUNT(*)::bigint AS views
       FROM view_events
-     WHERE created_at > now() - interval '30 days'
+     WHERE created_at > now() - (${days} * interval '1 day')
        AND event_type = 'page_view'
      GROUP BY 1
      ORDER BY 1 ASC
@@ -257,19 +310,43 @@ export async function loadViewsTrend30d(): Promise<ViewsTrendPoint[]> {
   }));
 }
 
+/** Legacy 30-day alias retained for any caller still wired to the old name. */
+export async function loadViewsTrend30d(): Promise<ViewsTrendPoint[]> {
+  return loadViewsTrend(30);
+}
+
 /**
- * Top 5 albums by distinct-viewer page_view count over the last 30 days.
+ * Top N albums by distinct-viewer page_view count over the given period.
  * Distinct viewers (not raw events) is the metric that matters — a single
  * refresh-spam viewer can't inflate the leaderboard.
+ *
+ * `days=null` means "all time".
  */
-export async function loadTopAlbums30d(limit: number = 5): Promise<TopAlbumRow[]> {
+export async function loadTopAlbums(limit: number = 5, days: number | null = 30): Promise<TopAlbumRow[]> {
+  if (days === null) {
+    const rows = await sql<TopAlbumDbRow[]>`
+      SELECT a.id AS album_id, a.title, COUNT(DISTINCT v.viewer_id)::bigint AS views
+        FROM view_events v
+        JOIN share_links sl ON sl.token = v.share_token
+        JOIN albums a       ON a.id    = sl.album_id
+       WHERE v.event_type = 'page_view'
+       GROUP BY a.id, a.title
+       ORDER BY views DESC
+       LIMIT ${limit}
+    `;
+    return rows.map((r) => ({
+      album_id: r.album_id,
+      title: r.title,
+      views: n(r.views),
+    }));
+  }
   const rows = await sql<TopAlbumDbRow[]>`
     SELECT a.id AS album_id, a.title, COUNT(DISTINCT v.viewer_id)::bigint AS views
       FROM view_events v
       JOIN share_links sl ON sl.token = v.share_token
       JOIN albums a       ON a.id    = sl.album_id
      WHERE v.event_type = 'page_view'
-       AND v.created_at > now() - interval '30 days'
+       AND v.created_at > now() - (${days} * interval '1 day')
      GROUP BY a.id, a.title
      ORDER BY views DESC
      LIMIT ${limit}
@@ -279,6 +356,68 @@ export async function loadTopAlbums30d(limit: number = 5): Promise<TopAlbumRow[]
     title: r.title,
     views: n(r.views),
   }));
+}
+
+/** Legacy 30-day alias retained for any caller still wired to the old name. */
+export async function loadTopAlbums30d(limit: number = 5): Promise<TopAlbumRow[]> {
+  return loadTopAlbums(limit, 30);
+}
+
+/**
+ * Daily favorites/page_views/photos-created sparkline data for the four
+ * stat tiles. Cheap aggregation — we return one map keyed by metric so the
+ * /chikaq page can pull all four series in a single round-trip.
+ *
+ * `days=null` is treated as "last 365 days" so the sparkline doesn't try
+ * to render thousands of bars in extreme cases.
+ */
+export interface TileSparklineSeries {
+  photos: ViewsTrendPoint[];
+  favorites: ViewsTrendPoint[];
+  storage: ViewsTrendPoint[];
+}
+
+export async function loadTileSparklines(days: number | null = 30): Promise<TileSparklineSeries> {
+  const window = days ?? 365;
+  const photos = await sql<TrendRow[]>`
+    SELECT date_trunc('day', created_at)::date AS day,
+           COUNT(*)::bigint AS views
+      FROM photos
+     WHERE created_at > now() - (${window} * interval '1 day')
+     GROUP BY 1
+     ORDER BY 1 ASC
+  `;
+  const favorites = await sql<TrendRow[]>`
+    SELECT date_trunc('day', created_at)::date AS day,
+           COUNT(*)::bigint AS views
+      FROM favorites
+     WHERE created_at > now() - (${window} * interval '1 day')
+     GROUP BY 1
+     ORDER BY 1 ASC
+  `;
+  // Storage growth is a running SUM(orig_bytes) over photos.created_at —
+  // we approximate it client-side by feeding the per-day created bytes as
+  // a sparkline ("storage delta per day"). The cumulative form would
+  // require a window function and the tile is happy with the delta shape.
+  const storage = await sql<TrendRow[]>`
+    SELECT date_trunc('day', created_at)::date AS day,
+           COALESCE(SUM(orig_bytes), 0)::bigint AS views
+      FROM photos
+     WHERE created_at > now() - (${window} * interval '1 day')
+     GROUP BY 1
+     ORDER BY 1 ASC
+  `;
+  function toPoints(rows: TrendRow[]): ViewsTrendPoint[] {
+    return rows.map((r) => ({
+      day: (r.day instanceof Date ? r.day : new Date(r.day)).toISOString().slice(0, 10),
+      views: n(r.views),
+    }));
+  }
+  return {
+    photos: toPoints(photos),
+    favorites: toPoints(favorites),
+    storage: toPoints(storage),
+  };
 }
 
 /**

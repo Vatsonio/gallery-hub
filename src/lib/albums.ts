@@ -1,10 +1,11 @@
 import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { sql } from "@/lib/db";
 import { randomUUID } from "node:crypto";
-import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
 import { variantKey, avifVariantKey, originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import { s3Client, BUCKET } from "@/lib/minio";
-import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoRow } from "@/lib/types";
+import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoExif, PhotoRow } from "@/lib/types";
 
 function slugify(input: string): string {
   return input
@@ -352,10 +353,48 @@ export async function listPhotoIdsForRegeneration(albumId: string): Promise<{ id
 
 export async function markPhotoReady(photoId: string, takenAt?: Date | null): Promise<void> {
   if (takenAt) {
-    await sql`UPDATE photos SET status = 'ready', taken_at = ${takenAt} WHERE id = ${photoId}`;
+    await sql`UPDATE photos SET status = 'ready', taken_at = ${takenAt}, updated_at = now() WHERE id = ${photoId}`;
   } else {
-    await sql`UPDATE photos SET status = 'ready' WHERE id = ${photoId}`;
+    await sql`UPDATE photos SET status = 'ready', updated_at = now() WHERE id = ${photoId}`;
   }
+}
+
+/**
+ * One-shot photo "ready" transition for the imgproxy era. Writes
+ * width/height (authoritative server-side metadata), taken_at (EXIF),
+ * thumbhash, and flips status='ready' + bumps updated_at — all in one
+ * round-trip so the worker hot path stays ~one DB write per photo.
+ *
+ * Variants are NOT generated server-side anymore: imgproxy resizes on
+ * demand from the original. The worker only fills in the bits imgproxy
+ * doesn't know (EXIF, thumbhash, sharp-verified dimensions).
+ *
+ * `exif` is the rich EXIF subset emitted by readPhotoExif; pass null
+ * when the parser couldn't recover anything useful (older/scrubbed
+ * files). Stored as JSONB so the album-stats aggregator can index on
+ * `exif->>'camera'`.
+ */
+export async function finalizePhotoMetadata(
+  photoId: string,
+  meta: {
+    width: number;
+    height: number;
+    takenAt: Date | null;
+    thumbhash: string;
+    exif?: PhotoExif | null;
+  },
+): Promise<void> {
+  await sql`
+    UPDATE photos
+       SET width      = ${meta.width},
+           height     = ${meta.height},
+           taken_at   = ${meta.takenAt},
+           thumbhash  = ${meta.thumbhash},
+           exif       = ${meta.exif ? sql.json({ ...meta.exif }) : null},
+           status     = 'ready',
+           updated_at = now()
+     WHERE id = ${photoId}
+  `;
 }
 
 export interface VariantSizes {
@@ -396,10 +435,26 @@ export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
       ON p.album_id = a.id
     WHERE a.deleted_at IS NULL
     ORDER BY a.updated_at DESC`;
-  return Promise.all(rows.map(async (r) => ({
-    ...r,
-    cover_thumb_url: r.cover_photo_id ? await presignGet(variantKey(r.id, r.cover_photo_id, "web"), 3600, {
-      responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-    }) : null,
-  })));
+  // Cover thumbs now resolve through imgproxy. We need the cover photo's
+  // filename (for ext recovery) + updated_at (for cache-bust) — pulled in
+  // one batch lookup so the album list stays O(1) DB round-trips.
+  const coverIds = rows.map((r) => r.cover_photo_id).filter((id): id is string => id !== null);
+  type CoverRow = { id: string; filename: string; updated_at: string };
+  const covers = coverIds.length
+    ? await sql<CoverRow[]>`SELECT id, filename, updated_at FROM photos WHERE id IN ${sql(coverIds)}`
+    : [];
+  const coverMap = new Map(covers.map((c) => [c.id, c]));
+  return rows.map((r) => {
+    let cover_thumb_url: string | null = null;
+    if (r.cover_photo_id) {
+      const cover = coverMap.get(r.cover_photo_id);
+      if (cover) {
+        cover_thumb_url = imgproxyWeb(
+          originalKey(r.id, cover.id, resolveOriginalExt(cover.filename)),
+          { version: photoVersionSeed(cover.updated_at) },
+        );
+      }
+    }
+    return { ...r, cover_thumb_url };
+  });
 }

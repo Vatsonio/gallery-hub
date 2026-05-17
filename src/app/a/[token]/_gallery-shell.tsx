@@ -9,38 +9,71 @@ import ExportModal, {
   type ExportOption,
   type ExportOptionId,
 } from "@/components/gallery/ExportModal";
+import PageLoadProgress from "@/components/gallery/PageLoadProgress";
+import PageSplash from "@/components/gallery/PageSplash";
+import {
+  FavoritesCountProvider,
+  useFavoritesCount,
+} from "@/components/gallery/FavoritesCount";
+import { FavoritedIdsProvider } from "@/components/gallery/FavoritedIds";
+import {
+  ExportSizesProvider,
+  useExportSizes,
+} from "@/components/gallery/ExportSizesContext";
+import { ToastProvider } from "@/components/ui/Toast";
 import type { ExportSizes } from "@/lib/exportSizes";
+
+/**
+ * How many photo tiles can register with the page-load progress bar.
+ * Includes the cover hero (it registers via the same context). The cap
+ * keeps the bar tracking only critical-render content — tiles below the
+ * fold with loading="lazy" may never enter the viewport, so including
+ * them would freeze progress at <100%. The cap matches roughly a typical
+ * desktop first screen (4 rows × 4 cols + cover).
+ */
+const PROGRESS_CAP = 32;
 
 interface Props {
   token: string;
-  /** Number of favorites the current viewer has (for the dock + tab badge). */
-  favoritesCount: number;
-  /** Optional human-readable size of the favorited set (e.g. "23 MB"). */
-  favoritesSizeLabel?: string;
-  /** Byte totals + counts for the three export options. */
-  exportSizes: ExportSizes;
-  /** True when the viewer is an admin previewing — favorites won't persist. */
-  isAdminPreview?: boolean;
+  /**
+   * Token-only export sizes (album total bytes/count + favorites zeroed).
+   * The static PPR shell ships this; ExportSizesHydration replaces the
+   * favorites parts the moment the dynamic viewer island streams in.
+   */
+  staticSizes: ExportSizes;
   children: React.ReactNode;
 }
 
 /**
  * Client-side shell hosting the floating export dock + mobile tab bar +
- * three-option export modal. Wraps server-rendered gallery / favorites
- * children. The shell never fetches — its parent server component
- * supplies all data so the dock and modal render correctly on first
- * paint.
+ * three-option export modal. Mounts the favorites + export-sizes contexts
+ * that the static prerender feeds (with viewer-specific bits zeroed) and
+ * the dynamic viewer island hydrates with per-cookie data.
  */
-export default function GalleryShell({
+export default function GalleryShell({ token, staticSizes, children }: Props) {
+  return (
+    <ToastProvider>
+     <FavoritesCountProvider initial={0}>
+     <FavoritedIdsProvider>
+     <ExportSizesProvider initial={staticSizes}>
+      <GalleryShellInner token={token}>{children}</GalleryShellInner>
+     </ExportSizesProvider>
+     </FavoritedIdsProvider>
+     </FavoritesCountProvider>
+    </ToastProvider>
+  );
+}
+
+function GalleryShellInner({
   token,
-  favoritesCount,
-  favoritesSizeLabel,
-  exportSizes,
-  isAdminPreview = false,
   children,
-}: Props) {
+}: {
+  token: string;
+  children: React.ReactNode;
+}): React.ReactNode {
   const [exportOpen, setExportOpen] = useState(false);
   const [preselect, setPreselect] = useState<ExportOptionId | undefined>(undefined);
+  const exportSizes = useExportSizes();
 
   // Restore scroll position when returning from the single-photo lightbox.
   // PhotoTile writes sessionStorage[gh:return-scroll:<token>] before nav;
@@ -61,8 +94,6 @@ export default function GalleryShell({
       ) {
         return;
       }
-      // Two rafs: first lets the layout settle, second runs after images
-      // claim their reserved sizes. Reduce-motion users get an instant jump.
       const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -82,7 +113,10 @@ export default function GalleryShell({
         variant: "original",
         icon: Heart,
         title: "Favorites — originals",
-        subtitle: `${exportSizes.favoritesCount} photo${exportSizes.favoritesCount === 1 ? "" : "s"} · full quality`,
+        subtitle:
+          exportSizes.favoritesCount === 0
+            ? "Like some photos first to enable this export"
+            : `${exportSizes.favoritesCount} photo${exportSizes.favoritesCount === 1 ? "" : "s"} · full quality`,
         bytes: exportSizes.favoritesOriginalBytes,
         disabled: exportSizes.favoritesCount === 0,
       },
@@ -92,8 +126,9 @@ export default function GalleryShell({
         variant: "web",
         icon: ImageIcon,
         title: "Whole album — web size",
-        subtitle: `${exportSizes.totalCount} photo${exportSizes.totalCount === 1 ? "" : "s"} · 2400px max`,
+        subtitle: `${exportSizes.totalCount} photo${exportSizes.totalCount === 1 ? "" : "s"} · 1600px · JPEG q80`,
         bytes: exportSizes.allWebBytes,
+        approxBytes: true,
         disabled: exportSizes.totalCount === 0,
       },
       {
@@ -110,19 +145,11 @@ export default function GalleryShell({
     [exportSizes],
   );
 
-  // No floating CTA anymore. Both whole-album and favorites exports are
-  // entered from the footer "Save all" button → ExportModal picks the
-  // right scope. Keeps the chrome quiet during browsing.
   const showSaveAllFooter = exportSizes.totalCount > 0;
 
   return (
-    <>
-      {isAdminPreview && (
-        <div className="sticky top-0 z-50 border-b border-rose-400/30 bg-rose-500/15 px-4 py-2 text-center text-xs text-rose-100 backdrop-blur">
-          Admin preview — favorites and views are not recorded. Open the link in
-          a private window to test as a real visitor.
-        </div>
-      )}
+    <PageLoadProgress cap={PROGRESS_CAP} enabled={exportSizes.totalCount > 0}>
+      <PageSplash enabled={exportSizes.totalCount > 0} />
       {children}
       {showSaveAllFooter && (
         <footer className="mx-auto flex w-full max-w-screen-2xl flex-col items-center gap-4 px-4 pb-[calc(max(0.5rem,env(safe-area-inset-bottom))+8rem)] pt-10 sm:pb-20">
@@ -145,10 +172,7 @@ export default function GalleryShell({
           </span>
         </footer>
       )}
-      <MobileTabBar
-        token={token}
-        favoritesCount={favoritesCount}
-      />
+      <LiveMobileTabBar token={token} />
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
@@ -156,6 +180,15 @@ export default function GalleryShell({
         options={options}
         preselect={preselect}
       />
-    </>
+    </PageLoadProgress>
   );
+}
+
+/**
+ * Thin wrapper that subscribes to the FavoritesCount context and feeds the
+ * live count into MobileTabBar.
+ */
+function LiveMobileTabBar({ token }: { token: string }): React.ReactNode {
+  const { count } = useFavoritesCount();
+  return <MobileTabBar token={token} favoritesCount={count} />;
 }

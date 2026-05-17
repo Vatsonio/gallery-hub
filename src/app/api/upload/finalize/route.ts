@@ -6,6 +6,7 @@ import { originalKey } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
 import { sanitizeFilename } from "@/lib/sanitize";
 import { notifyNewUpload } from "@/lib/notifications";
+import { isImgproxyEnabled, warmImgproxyVariants } from "@/lib/imgproxy";
 import type { FinalizeRequestBody, FinalizeResponse, GenerateDerivativesJobData } from "@/lib/types";
 
 function inferExt(filename: string): string {
@@ -88,6 +89,24 @@ export async function POST(req: Request): Promise<Response> {
       photo_count: inserted,
     });
   }
+
+  // Pre-warm imgproxy for the two hot variants (thumb + web) so the first
+  // real viewer doesn't pay the 200–500 ms cold-encode cost per tile. We
+  // fire-and-forget so finalize itself stays sub-second even at 150 photos:
+  // the warm storm runs in the background of the Node event loop and is
+  // bounded by imgproxy's own concurrency limit. Originals haven't been
+  // versioned yet (worker hasn't bumped updated_at) so we omit the version
+  // param — imgproxy still caches against the raw s3:// source key.
+  if (inserted > 0 && isImgproxyEnabled()) {
+    const warmItems = sanitized.map((p) => ({
+      s3Key: originalKey(album.id, p.photo_id, inferExt(p.filename)),
+    }));
+    void warmImgproxyVariants(warmItems).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn("[finalize] imgproxy warm failed:", (err as Error).message);
+    });
+  }
+
   const resp: FinalizeResponse = { inserted };
   return NextResponse.json(resp);
 }

@@ -11,6 +11,9 @@ import {
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
 import { headObject } from "@/lib/minio";
+import { rewriteWatermarkPng } from "@/lib/watermarks";
+import { DEFAULT_WATERMARK_TEXT } from "@/lib/images";
+import { sql } from "@/lib/db";
 import type { AlbumStatus } from "@/lib/types";
 
 async function gate(): Promise<void> {
@@ -97,17 +100,32 @@ export async function updateAlbumWatermarkAction(
 ): Promise<void> {
   await gate();
   await updateAlbum(albumId, { watermarkEnabled: enabled, watermarkText: text });
+  // imgproxy era: composition happens lazily at request time via the
+  // wm_url processing step. We just need the watermark PNG to exist at
+  // watermarks/{albumId}.png; the URL builder references it directly.
+  // Rewriting the bytes invalidates any in-flight imgproxy cache entries
+  // that hold the previous watermark (the source URL is the same — we
+  // can't ?v= a static asset — but ETag-based revalidation handles it).
+  if (enabled) {
+    const t = (text ?? "").trim() || DEFAULT_WATERMARK_TEXT;
+    await rewriteWatermarkPng(albumId, t).catch((err) => {
+      console.error("[admin] watermark PNG rewrite failed", err);
+    });
+  }
+  // Bump every photo's updated_at so the next render forces fresh
+  // imgproxy URLs that pick up the new watermark composition (or its
+  // absence). The actual pixel work happens on the next image fetch —
+  // no worker queue involvement needed in the imgproxy era.
+  await sql`UPDATE photos SET updated_at = now() WHERE album_id = ${albumId}`;
   revalidatePath("/admin/albums");
 }
 
 /**
- * Re-enqueue every photo in the album for derivative regeneration. Used
- * after toggling the watermark setting — the worker will re-stamp (or
- * un-stamp) the web + large variants based on the album's current flag.
- *
- * Only photos with a discoverable `original.*` key are enqueued; if the
- * original is missing (e.g. still uploading) it gets skipped silently
- * and will be picked up on its first natural derivative run.
+ * Legacy regen entry point — kept for compatibility with the UI's
+ * "Re-stamp all" button. In the imgproxy era there's nothing to
+ * regenerate (variants resize on demand), but we still bump updated_at
+ * so the URL builder emits fresh ?v= values and re-queue the metadata
+ * worker so width/height/thumbhash get re-read if the originals shifted.
  */
 export async function regenerateAlbumDerivativesAction(albumId: string): Promise<{ enqueued: number }> {
   await gate();

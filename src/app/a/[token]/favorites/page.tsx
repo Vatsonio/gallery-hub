@@ -6,9 +6,11 @@ import {
   resolveShareLinkStatus,
   unlockCookieName,
 } from "@/lib/share";
-import { listPhotos, getAlbumById } from "@/lib/albums";
-import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey, avifVariantKey } from "@/lib/keys";
+import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxySrcset, photoVersionSeed } from "@/lib/imgproxy";
+import { watermarkKey } from "@/lib/watermarks";
 import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { layoutJustifiedRows } from "@/lib/justified";
 import {
@@ -21,6 +23,8 @@ import { computeExportSizes } from "@/lib/exportSizes";
 import { safeCapture } from "@/lib/analytics";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import GalleryShell from "../_gallery-shell";
+import ViewerHydration from "@/components/gallery/ViewerHydration";
+import { ExportSizesHydration } from "@/components/gallery/ExportSizesContext";
 
 export const dynamic = "force-dynamic";
 
@@ -89,10 +93,10 @@ export default async function FavoritesPage({ params }: Props) {
     return (
       <GalleryShell
         token={token}
-        favoritesCount={0}
-        exportSizes={emptySizes}
-        isAdminPreview={adminSession.ok}
+        staticSizes={emptySizes}
       >
+        <ViewerHydration favoriteIds={[]} favoritesCount={0} />
+        <ExportSizesHydration sizes={emptySizes} />
         <Header token={token} count={0} />
         <main className="flex flex-col items-center justify-center px-6 py-24 text-center text-white/60 min-h-[60vh]">
           <div className="text-2xl font-light text-white/80">No favorites yet</div>
@@ -115,26 +119,25 @@ export default async function FavoritesPage({ params }: Props) {
   const byId = new Map(allPhotos.map((p) => [p.id, p]));
   const ordered = favIds.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
 
-  const decorated = await Promise.all(
-    ordered.map(async (p) => {
-      const [webUrl, avifUrl] = await Promise.all([
-        presignGet(variantKey(album.id, p.id, "web"), 3600, {
-          responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-        }),
-        p.avif_bytes_web
-          ? presignGet(avifVariantKey(album.id, p.id, "web"), 3600, {
-              responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-            })
-          : Promise.resolve(null),
-      ]);
-      return {
-        ...p,
-        web_url: webUrl,
-        avif_url: avifUrl,
-        thumbhash_url: thumbhashToDataUrl(p.thumbhash),
-      };
-    }),
-  );
+  const albumWatermark = await getAlbumWatermark(album.id);
+  const watermarkRef = albumWatermark.enabled ? { key: watermarkKey(album.id) } : null;
+
+  const decorated = ordered.map((p) => {
+    const origKey = originalKey(album.id, p.id, resolveOriginalExt(p.filename));
+    const version = photoVersionSeed(p.updated_at);
+    const srcset = imgproxySrcset(origKey, [400, 800, 1600], {
+      version,
+      watermark: watermarkRef,
+    });
+    return {
+      ...p,
+      web_url: srcset.src,
+      web_srcset: srcset.srcSet,
+      // Accept-header negotiation removes the need for a separate AVIF URL.
+      avif_url: null as string | null,
+      thumbhash_url: thumbhashToDataUrl(p.thumbhash),
+    };
+  });
 
   const totalBytes = decorated.reduce((s, p) => s + Number(p.orig_bytes ?? 0), 0);
   const sizeLabel = formatBytes(totalBytes);
@@ -163,11 +166,10 @@ export default async function FavoritesPage({ params }: Props) {
   return (
     <GalleryShell
       token={token}
-      favoritesCount={favIds.length}
-      favoritesSizeLabel={sizeLabel}
-      exportSizes={exportSizes}
-      isAdminPreview={adminSession.ok}
+      staticSizes={exportSizes}
     >
+      <ViewerHydration favoriteIds={favIds} favoritesCount={favIds.length} />
+      <ExportSizesHydration sizes={exportSizes} />
       <Header token={token} count={favIds.length} />
       <div className="mx-auto max-w-screen-2xl">
         {/* Mobile */}
@@ -183,20 +185,26 @@ export default async function FavoritesPage({ params }: Props) {
                   ["--row-h" as string]: `${Math.round(row.height)}px`,
                 }}
               >
-                {row.items.map((item) => (
-                  <PhotoTile
-                    key={item.id}
-                    token={token}
-                    photoId={item.id}
-                    href={`/a/${token}/p/${item.id}`}
-                    webUrl={photoMap.get(item.id)!.web_url}
-                    avifUrl={photoMap.get(item.id)!.avif_url}
-                    thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
-                    flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                    initialFavorited={true}
-                    index={photoIndex.get(item.id) ?? 0}
-                  />
-                ))}
+                {row.items.map((item) => {
+                  const idx = photoIndex.get(item.id) ?? 0;
+                  const p = photoMap.get(item.id)!;
+                  return (
+                    <PhotoTile
+                      key={item.id}
+                      token={token}
+                      photoId={item.id}
+                      href={`/a/${token}/p/${item.id}`}
+                      webUrl={p.web_url}
+                      avifUrl={p.avif_url}
+                      srcSet={p.web_srcset}
+                      thumbhashDataUrl={p.thumbhash_url}
+                      flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      initialFavorited={true}
+                      index={idx}
+                      priority={idx < 32 ? "high" : "low"}
+                    />
+                  );
+                })}
               </div>
             );
           })}
@@ -214,20 +222,26 @@ export default async function FavoritesPage({ params }: Props) {
                   ["--row-h" as string]: `${Math.round(row.height)}px`,
                 }}
               >
-                {row.items.map((item) => (
-                  <PhotoTile
-                    key={item.id}
-                    token={token}
-                    photoId={item.id}
-                    href={`/a/${token}/p/${item.id}`}
-                    webUrl={photoMap.get(item.id)!.web_url}
-                    avifUrl={photoMap.get(item.id)!.avif_url}
-                    thumbhashDataUrl={photoMap.get(item.id)!.thumbhash_url}
-                    flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
-                    initialFavorited={true}
-                    index={photoIndex.get(item.id) ?? 0}
-                  />
-                ))}
+                {row.items.map((item) => {
+                  const idx = photoIndex.get(item.id) ?? 0;
+                  const p = photoMap.get(item.id)!;
+                  return (
+                    <PhotoTile
+                      key={item.id}
+                      token={token}
+                      photoId={item.id}
+                      href={`/a/${token}/p/${item.id}`}
+                      webUrl={p.web_url}
+                      avifUrl={p.avif_url}
+                      srcSet={p.web_srcset}
+                      thumbhashDataUrl={p.thumbhash_url}
+                      flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      initialFavorited={true}
+                      index={idx}
+                      priority={idx < 32 ? "high" : "low"}
+                    />
+                  );
+                })}
               </div>
             );
           })}

@@ -4,6 +4,12 @@ import { getIronSession, type SessionOptions, type IronSession } from "iron-sess
 export interface AdminSession {
   userId?: string;
   email?: string;
+  /**
+   * Role at the moment of login. The DB is the source of truth — when an owner
+   * downgrades an admin live, the affected session keeps its old role until
+   * next login. Acceptable trade-off: avoiding a DB hit on every page.
+   */
+  role?: "owner" | "admin";
 }
 
 // Known-bad placeholder secrets that must never reach a running app. The
@@ -61,9 +67,18 @@ export async function getAdminSession(): Promise<IronSession<AdminSession>> {
   return getIronSession<AdminSession>(cookieStore, sessionOptions);
 }
 
-export interface AdminAuthOk { ok: true; userId: string; email: string; }
+export interface AdminAuthOk {
+  ok: true;
+  userId: string;
+  email: string;
+  role: "owner" | "admin";
+}
 export interface AdminAuthErr { ok: false; }
 export type AdminAuthResult = AdminAuthOk | AdminAuthErr;
+
+export function isOwner(r: AdminAuthResult): boolean {
+  return r.ok && r.role === "owner";
+}
 
 /**
  * Validates admin auth from an incoming Request (Route Handler / Server Action with manual req).
@@ -72,7 +87,7 @@ export type AdminAuthResult = AdminAuthOk | AdminAuthErr;
  */
 export async function requireAdminSession(req: Request): Promise<AdminAuthResult> {
   if (process.env.NODE_ENV === "test" && req.headers.get("x-test-admin") === "1") {
-    return { ok: true, userId: "test-admin", email: "test@local" };
+    return { ok: true, userId: "test-admin", email: "test@local", role: "owner" };
   }
   // Build a CookieStore-like wrapper around the request Cookie header
   const cookieHeader = req.headers.get("cookie") ?? "";
@@ -92,21 +107,43 @@ export async function requireAdminSession(req: Request): Promise<AdminAuthResult
     cookieStoreLike as unknown as never,
     sessionOptions
   );
-  if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
+  if (session.userId && session.email) {
+    return {
+      ok: true,
+      userId: session.userId,
+      email: session.email,
+      // Older sessions issued before the role rollout default to "admin" so
+      // they can keep using album CRUD; owner-only screens re-prompt login.
+      role: session.role ?? "admin",
+    };
+  }
   return { ok: false };
 }
 
 export async function requireAdminSessionFromCookies(): Promise<AdminAuthResult> {
   const session = await getAdminSession();
-  if (session.userId && session.email) return { ok: true, userId: session.userId, email: session.email };
+  if (session.userId && session.email) {
+    return {
+      ok: true,
+      userId: session.userId,
+      email: session.email,
+      role: session.role ?? "admin",
+    };
+  }
   return { ok: false };
 }
 
 export async function requireAdmin(): Promise<AdminAuthOk> {
   if (process.env.GH_TEST_BYPASS_AUTH === "1") {
-    return { ok: true, userId: "test-admin", email: "test@local" };
+    return { ok: true, userId: "test-admin", email: "test@local", role: "owner" };
   }
   const r = await requireAdminSessionFromCookies();
   if (!r.ok) throw new Error("unauthorized");
+  return r;
+}
+
+export async function requireOwner(): Promise<AdminAuthOk> {
+  const r = await requireAdmin();
+  if (r.role !== "owner") throw new Error("forbidden: owner only");
   return r;
 }

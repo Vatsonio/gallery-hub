@@ -1,0 +1,342 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createHmac } from "node:crypto";
+import {
+  buildImgproxyUrl,
+  imgproxyThumb,
+  imgproxyWeb,
+  imgproxyLarge,
+  imgproxySrcset,
+  isImgproxyEnabled,
+  photoVersionSeed,
+  warmImgproxyVariants,
+  __resetImgproxyContextForTests,
+} from "@/lib/imgproxy";
+
+// Fixed dev-only test secrets — never used outside this file.
+const TEST_KEY_HEX = "0011223344556677889900aabbccddeeff";
+const TEST_SALT_HEX = "ffeeddccbbaa00998877665544332211";
+const TEST_BASE = "https://img.test.local";
+const TEST_BUCKET = "gallery-test";
+
+function setupEnv(): void {
+  process.env.PUBLIC_IMGPROXY_URL = TEST_BASE;
+  process.env.IMGPROXY_KEY = TEST_KEY_HEX;
+  process.env.IMGPROXY_SALT = TEST_SALT_HEX;
+  process.env.IMGPROXY_BUCKET = TEST_BUCKET;
+  __resetImgproxyContextForTests();
+}
+
+function tearDownEnv(): void {
+  delete process.env.PUBLIC_IMGPROXY_URL;
+  delete process.env.IMGPROXY_KEY;
+  delete process.env.IMGPROXY_SALT;
+  delete process.env.IMGPROXY_BUCKET;
+  __resetImgproxyContextForTests();
+}
+
+function base64url(b: Buffer): string {
+  return b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function expectedSig(pathBody: string): string {
+  const key = Buffer.from(TEST_KEY_HEX, "hex");
+  const salt = Buffer.from(TEST_SALT_HEX, "hex");
+  const mac = createHmac("sha256", key).update(salt).update(pathBody).digest();
+  return base64url(mac);
+}
+
+function decodeSource(encoded: string): string {
+  const pad = encoded.length % 4 === 0 ? "" : "=".repeat(4 - (encoded.length % 4));
+  return Buffer.from(encoded.replace(/-/g, "+").replace(/_/g, "/") + pad, "base64").toString("utf8");
+}
+
+describe("imgproxy URL builder", () => {
+  beforeEach(setupEnv);
+  afterEach(tearDownEnv);
+
+  it("isImgproxyEnabled true when env wired", () => {
+    expect(isImgproxyEnabled()).toBe(true);
+  });
+
+  it("isImgproxyEnabled false without env, and builder returns a placeholder", () => {
+    tearDownEnv();
+    expect(isImgproxyEnabled()).toBe(false);
+    expect(buildImgproxyUrl("albums/a/p/original.jpg")).toBe("imgproxy://albums/a/p/original.jpg");
+  });
+
+  it("builds a signed URL containing the imgproxy base, signature, processing, and encoded source", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, height: 400, quality: 75 });
+    expect(url.startsWith(`${TEST_BASE}/`)).toBe(true);
+
+    // Strip base; the rest is /{sig}/{processing}/{encodedSource}[.{ext}]
+    const rest = url.slice(TEST_BASE.length);
+    const segments = rest.split("/").filter(Boolean);
+    expect(segments.length).toBeGreaterThanOrEqual(3);
+    const [sig, resize, quality, encodedSource] = segments;
+    expect(sig.length).toBeGreaterThan(20);
+    expect(resize).toBe("resize:fit:400:400:0");
+    expect(quality).toBe("quality:75");
+    // Encoded source should decode back to the s3:// URI.
+    expect(decodeSource(encodedSource)).toBe(`s3://${TEST_BUCKET}/albums/a/p/original.jpg`);
+  });
+
+  it("signature roundtrips: recomputed HMAC matches the URL's signature segment", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 1600, height: 1600, quality: 82 });
+    const rest = url.slice(TEST_BASE.length);
+    const [, ...tail] = rest.split("/").filter(Boolean);
+    // Path body the signer signs is exactly "/{processing}/{encodedSource}".
+    const pathBody = "/" + tail.join("/");
+    const sig = rest.split("/").filter(Boolean)[0];
+    expect(sig).toBe(expectedSig(pathBody));
+  });
+
+  it("format='auto' omits a trailing extension so imgproxy negotiates via Accept", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, format: "auto" });
+    // No `.webp`/`.avif`/`.jpg` suffix in the final segment.
+    const last = url.split("/").pop() ?? "";
+    expect(last.includes(".")).toBe(false);
+  });
+
+  it("format='webp' appends a .webp extension to the encoded source", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, format: "webp" });
+    expect(url.endsWith(".webp")).toBe(true);
+  });
+
+  it("includes a watermark processing option + wm_url when watermark.key is set", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", {
+      width: 1600,
+      watermark: { key: "watermarks/album123.png" },
+    });
+    expect(url).toContain("/watermark:");
+    expect(url).toContain("/wm_url:");
+    // The wm_url segment encodes the s3:// reference to the watermark PNG.
+    const segments = url.split("/");
+    const wmSegment = segments.find((s) => s.startsWith("wm_url:"));
+    expect(wmSegment).toBeDefined();
+    const encoded = wmSegment!.slice("wm_url:".length);
+    expect(decodeSource(encoded)).toBe(`s3://${TEST_BUCKET}/watermarks/album123.png`);
+  });
+
+  it("emits cachebuster:N in the processing chain and keeps the S3 source clean", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, version: 1700000000 });
+    expect(url).toContain("/cachebuster:1700000000/");
+    const segments = url.split("/").filter(Boolean);
+    const encodedSource = segments[segments.length - 1];
+    // Source URI must NOT include a query string — MinIO rejects unknown
+    // params as InvalidArgument: Invalid version id specified.
+    expect(decodeSource(encodedSource)).toBe(`s3://${TEST_BUCKET}/albums/a/p/original.jpg`);
+  });
+
+  it("different version values produce different signatures", () => {
+    const a = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, version: 1 });
+    const b = buildImgproxyUrl("albums/a/p/original.jpg", { width: 400, version: 2 });
+    const sigA = a.slice(TEST_BASE.length).split("/").filter(Boolean)[0];
+    const sigB = b.slice(TEST_BASE.length).split("/").filter(Boolean)[0];
+    expect(sigA).not.toBe(sigB);
+  });
+
+  it("imgproxyThumb / imgproxyWeb / imgproxyLarge use the documented size buckets", () => {
+    const t = imgproxyThumb("albums/a/p/original.jpg");
+    const w = imgproxyWeb("albums/a/p/original.jpg");
+    const l = imgproxyLarge("albums/a/p/original.jpg");
+    expect(t).toContain("/resize:fit:400:400:0/");
+    expect(t).toContain("/quality:75/");
+    expect(w).toContain("/resize:fit:1600:1600:0/");
+    expect(w).toContain("/quality:82/");
+    expect(l).toContain("/resize:fit:2400:2400:0/");
+    expect(l).toContain("/quality:86/");
+  });
+
+  it("imgproxyWeb honours `version` overrides passed by the caller", () => {
+    const v1 = imgproxyWeb("albums/a/p/original.jpg", { version: 100 });
+    const v2 = imgproxyWeb("albums/a/p/original.jpg", { version: 200 });
+    expect(v1).not.toBe(v2);
+  });
+
+  it("rejects non-hex IMGPROXY_KEY at context resolution time", () => {
+    process.env.IMGPROXY_KEY = "not-hex-zzzz";
+    __resetImgproxyContextForTests();
+    expect(() => buildImgproxyUrl("albums/a/p/original.jpg", { width: 400 })).toThrow(/hex/);
+  });
+
+  it("default resize mode is 'fit'", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", { width: 100, height: 100 });
+    expect(url).toContain("/resize:fit:100:100:0/");
+  });
+
+  it("resize 'fill' with explicit gravity emits both segments", () => {
+    const url = buildImgproxyUrl("albums/a/p/original.jpg", {
+      width: 100,
+      height: 100,
+      resize: "fill",
+      gravity: "ce",
+    });
+    expect(url).toContain("/resize:fill:100:100:0/");
+    expect(url).toContain("/gravity:ce/");
+  });
+
+  it("quality is clamped into 1..100", () => {
+    const overshoot = buildImgproxyUrl("albums/a/p/original.jpg", { quality: 250 });
+    const undershoot = buildImgproxyUrl("albums/a/p/original.jpg", { quality: -50 });
+    expect(overshoot).toContain("/quality:100/");
+    expect(undershoot).toContain("/quality:1/");
+  });
+});
+
+describe("imgproxySrcset", () => {
+  beforeEach(setupEnv);
+  afterEach(tearDownEnv);
+
+  it("emits one URL per width plus a srcSet string ordered ascending", () => {
+    const r = imgproxySrcset("albums/a/p/original.jpg", [1600, 400, 800]);
+    // Sorted ascending and de-duplicated.
+    const matches = r.srcSet.match(/(\d+)w/g);
+    expect(matches).toEqual(["400w", "800w", "1600w"]);
+    // `src` is the largest width URL so non-srcset fallback gets the best
+    // single image.
+    expect(r.src).toContain("/resize:fit:1600:1600:0/");
+  });
+
+  it("tunes quality per width (low quality for small thumbs)", () => {
+    const r = imgproxySrcset("albums/a/p/original.jpg", [400, 800, 1600]);
+    // Pull each width's URL out of the comma-separated srcSet.
+    const segs = r.srcSet.split(",").map((s) => s.trim());
+    const find = (w: string) => segs.find((s) => s.endsWith(w))!;
+    expect(find("400w")).toContain("/quality:75/");
+    expect(find("800w")).toContain("/quality:80/");
+    expect(find("1600w")).toContain("/quality:82/");
+  });
+
+  it("threads watermark + version params through every variant", () => {
+    const r = imgproxySrcset(
+      "albums/a/p/original.jpg",
+      [400, 800, 1600],
+      { version: 1234567890, watermark: { key: "watermarks/album123.png" } },
+    );
+    const urls = r.srcSet.split(",").map((s) => s.trim().split(" ")[0]);
+    expect(urls.every((u) => u.includes("/cachebuster:1234567890/"))).toBe(true);
+    expect(urls.every((u) => u.includes("/watermark:0.6:soea:20:0.25/"))).toBe(true);
+  });
+
+  it("throws when called with an empty widths array", () => {
+    expect(() => imgproxySrcset("albums/a/p/original.jpg", [])).toThrow(/at least one/);
+  });
+
+  it("dedupes duplicate widths so the srcSet stays minimal", () => {
+    const r = imgproxySrcset("albums/a/p/original.jpg", [400, 400, 800]);
+    const matches = r.srcSet.match(/(\d+)w/g);
+    expect(matches).toEqual(["400w", "800w"]);
+  });
+});
+
+describe("warmImgproxyVariants", () => {
+  beforeEach(setupEnv);
+  afterEach(() => {
+    tearDownEnv();
+    vi.restoreAllMocks();
+    // vi.stubGlobal lives on a separate stack from vi.spyOn — restoreAllMocks
+    // does NOT clean it up. Without this, the `fetch` stub leaks into other
+    // test files and breaks anything that calls global fetch (MinIO S3
+    // client, jobs handlers, etc).
+    vi.unstubAllGlobals();
+  });
+
+  function mockFetchOk(): { calls: string[]; spy: ReturnType<typeof vi.fn> } {
+    const calls: string[] = [];
+    const fakeBody = new ArrayBuffer(8);
+    const spy = vi.fn(async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => fakeBody,
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", spy);
+    return { calls, spy };
+  }
+
+  it("fires GETs for thumb + web for every photo (2 hits/photo)", async () => {
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([
+      { s3Key: "albums/a/p1/original.jpg" },
+      { s3Key: "albums/a/p2/original.jpg" },
+      { s3Key: "albums/a/p3/original.jpg" },
+    ]);
+    expect(calls).toHaveLength(6);
+    // Each URL contains either resize:fit:400:400 (thumb) or resize:fit:1600:1600 (web).
+    const thumb = calls.filter((u) => u.includes("/resize:fit:400:400:0/"));
+    const web = calls.filter((u) => u.includes("/resize:fit:1600:1600:0/"));
+    expect(thumb).toHaveLength(3);
+    expect(web).toHaveLength(3);
+  });
+
+  it("requests AVIF/WEBP via Accept so imgproxy caches the right encoding", async () => {
+    const { spy } = mockFetchOk();
+    await warmImgproxyVariants([{ s3Key: "albums/a/p1/original.jpg" }]);
+    const lastInit = spy.mock.calls[0][1] as RequestInit;
+    const acceptHeader = (lastInit.headers as Record<string, string>)["accept"];
+    expect(acceptHeader).toContain("image/avif");
+    expect(acceptHeader).toContain("image/webp");
+  });
+
+  it("is a no-op when imgproxy env isn't wired", async () => {
+    tearDownEnv();
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([{ s3Key: "albums/a/p1/original.jpg" }]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("is a no-op for empty input", async () => {
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("swallows fetch errors and still resolves (best-effort warming)", async () => {
+    const errSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("boom"); }));
+    await expect(
+      warmImgproxyVariants([
+        { s3Key: "albums/a/p1/original.jpg" },
+        { s3Key: "albums/a/p2/original.jpg" },
+      ]),
+    ).resolves.toBeUndefined();
+    // Each photo emits 2 URLs and both fail — expect 4 warn lines.
+    expect(errSpy).toHaveBeenCalled();
+  });
+
+  it("threads the version param into cachebuster:N on every URL", async () => {
+    const { calls } = mockFetchOk();
+    await warmImgproxyVariants([{ s3Key: "albums/a/p1/original.jpg", version: 1234567890 }]);
+    expect(calls.every((u) => u.includes("/cachebuster:1234567890/"))).toBe(true);
+  });
+});
+
+describe("photoVersionSeed", () => {
+  beforeEach(setupEnv);
+  afterEach(tearDownEnv);
+
+  it("returns 0 for null / undefined / empty input", () => {
+    expect(photoVersionSeed(null)).toBe(0);
+    expect(photoVersionSeed(undefined)).toBe(0);
+    expect(photoVersionSeed("")).toBe(0);
+  });
+
+  it("returns floor(ms/1000) for a numeric ms timestamp", () => {
+    expect(photoVersionSeed(1_700_000_123_400)).toBe(1_700_000_123);
+  });
+
+  it("parses an ISO string into seconds since epoch", () => {
+    expect(photoVersionSeed("2026-05-16T10:00:00.000Z")).toBe(Math.floor(Date.parse("2026-05-16T10:00:00.000Z") / 1000));
+  });
+
+  it("accepts a Date instance", () => {
+    const d = new Date("2026-05-16T10:00:00.000Z");
+    expect(photoVersionSeed(d)).toBe(Math.floor(d.getTime() / 1000));
+  });
+
+  it("returns 0 for malformed strings", () => {
+    expect(photoVersionSeed("not-a-date")).toBe(0);
+  });
+});

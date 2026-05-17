@@ -1,28 +1,60 @@
 import Link from "next/link";
-import { Activity, Bell, Heart, Images, LogOut } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  Heart,
+  Images,
+  LogOut,
+  Settings,
+  Users as UsersIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { logoutAction } from "./logout/actions";
 import { getAdminSession } from "@/lib/session";
+import { ToastProvider } from "@/components/ui/Toast";
 
-const NAV = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  ownerOnly?: boolean;
+}
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const NAV: NavSection[] = [
   {
     title: "Workspace",
     items: [
       { href: "/admin/albums", label: "Albums", icon: Images },
-    ]
+    ],
   },
   {
     title: "Insights",
     items: [
       { href: "/admin/selections", label: "Client Selections", icon: Heart },
       { href: "/admin/notifications", label: "Notifications", icon: Bell },
-      { href: "/chikaq", label: "Insights", icon: Activity },
-    ]
-  }
+      { href: "/admin/metrics", label: "Metrics", icon: BarChart3, ownerOnly: true },
+      { href: "/chikaq", label: "PostHog", icon: Activity },
+    ],
+  },
+  {
+    title: "System",
+    items: [
+      { href: "/admin/users", label: "Users", icon: UsersIcon, ownerOnly: true },
+      { href: "/admin/settings", label: "Settings", icon: Settings, ownerOnly: true },
+    ],
+  },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getAdminSession();
   const email = session.email ?? "";
+  const role: "owner" | "admin" = session.role ?? "admin";
+  const isOwner = role === "owner";
 
   return (
     <div className="min-h-screen flex bg-bg text-text">
@@ -30,31 +62,43 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <div className="px-5 py-5 border-b border-line">
           <p className="text-sm font-semibold tracking-wider">Gallery Hub</p>
           <p className="text-[11px] text-text-muted truncate">{email}</p>
+          <p className="mt-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-text-muted">
+            <span
+              className={`inline-block size-1.5 rounded-full ${
+                isOwner ? "bg-rose-400" : "bg-text-muted"
+              }`}
+            />
+            {role}
+          </p>
         </div>
         <nav className="flex-1 px-2 py-4 space-y-6 text-sm">
-          {NAV.map((section) => (
-            <div key={section.title}>
-              <p className="px-3 mb-2 text-[10px] uppercase tracking-widest text-text-muted">
-                {section.title}
-              </p>
-              <ul className="space-y-0.5">
-                {section.items.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-card transition"
-                      >
-                        <Icon className="size-4 text-text-muted" />
-                        <span>{item.label}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
+          {NAV.map((section) => {
+            const visible = section.items.filter((it) => !it.ownerOnly || isOwner);
+            if (visible.length === 0) return null;
+            return (
+              <div key={section.title}>
+                <p className="px-3 mb-2 text-[10px] uppercase tracking-widest text-text-muted">
+                  {section.title}
+                </p>
+                <ul className="space-y-0.5">
+                  {visible.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-card transition"
+                        >
+                          <Icon className="size-4 text-text-muted" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </nav>
         <form action={logoutAction} className="p-3 border-t border-line">
           <button
@@ -66,7 +110,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </button>
         </form>
       </aside>
-      <main className="flex-1 min-w-0">{children}</main>
+      <main className="flex-1 min-w-0">
+        <ToastProvider>{children}</ToastProvider>
+      </main>
     </div>
   );
 }

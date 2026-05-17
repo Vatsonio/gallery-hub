@@ -102,15 +102,23 @@ In the Cloudflare dashboard:
 
 ### Add public hostnames
 
-Still in the tunnel config screen, add three public hostnames:
+Still in the tunnel config screen, add four public hostnames:
 
 | Hostname                          | Service                       |
 | --------------------------------- | ----------------------------- |
 | `gallery.divass.space`            | `http://gallery-app:3000`     |
 | `minio.gallery.divass.space`      | `http://gallery-minio:9000`   |
+| `img.gallery.divass.space`        | `http://gallery-imgproxy:8080`|
 | `posthog.gallery.divass.space`    | `http://posthog:8000`         |
 
 Cloudflare auto-creates the matching CNAME records in DNS.
+
+The `img.` hostname fronts the imgproxy service, which resizes
+photos from MinIO on demand and serves them back to the browser
+with a 1-year cache TTL. See
+[`docs/imgproxy-cheatsheet.md`](imgproxy-cheatsheet.md) +
+[`docs/perf/2026-05-16-imgproxy-migration.md`](perf/2026-05-16-imgproxy-migration.md)
+for the architecture and the URL signing format.
 
 ### (Optional) credentials-file mode
 

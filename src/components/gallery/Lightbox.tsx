@@ -14,6 +14,8 @@ import {
 import HeartBurst from "./HeartBurst";
 import { createDoubleTapDetector } from "@/lib/double-tap";
 import { toggleFavorite } from "@/app/a/[token]/_actions";
+import { formatBytes } from "@/lib/format";
+import type { PhotoExif } from "@/lib/types";
 
 interface Props {
   token: string;
@@ -27,6 +29,14 @@ interface Props {
   index: number;
   total: number;
   initialFavorited: boolean;
+  /** EXIF subset captured at upload. Optional — older photos may have nothing. */
+  exif?: PhotoExif | null;
+  /** Pixel dimensions of the original (already orientation-corrected). */
+  dimensions?: { width: number; height: number } | null;
+  /** Original file byte size. */
+  sizeBytes?: number | null;
+  /** Original filename — used in the info panel header. */
+  filename?: string | null;
 }
 
 export default function Lightbox({
@@ -41,6 +51,10 @@ export default function Lightbox({
   index,
   total,
   initialFavorited,
+  exif,
+  dimensions,
+  sizeBytes,
+  filename,
 }: Props) {
   const router = useRouter();
   const downloadEl = useRef<HTMLAnchorElement>(null);
@@ -48,6 +62,7 @@ export default function Lightbox({
   const [touchTranslate, setTouchTranslate] = useState(0);
   const [favorited, setFavorited] = useState(initialFavorited);
   const [burst, setBurst] = useState(0);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [, startTransition] = useTransition();
   const inflight = useRef(false);
 
@@ -203,10 +218,12 @@ export default function Lightbox({
         </div>
         <button
           aria-label="Info"
-          onClick={() => {
-            /* placeholder */
-          }}
-          className="h-11 w-11 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-md text-white hover:bg-white/20 transition"
+          aria-pressed={infoOpen}
+          onClick={() => setInfoOpen((v) => !v)}
+          className={
+            "h-11 w-11 flex items-center justify-center rounded-full backdrop-blur-md text-white transition " +
+            (infoOpen ? "bg-rose-500/40 hover:bg-rose-500/50" : "bg-white/10 hover:bg-white/20")
+          }
         >
           <Info className="h-5 w-5" aria-hidden />
         </button>
@@ -302,6 +319,153 @@ export default function Lightbox({
           <Share2 className="h-5 w-5" aria-hidden />
         </button>
       </div>
+
+      <ExifPanel
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        exif={exif ?? null}
+        dimensions={dimensions ?? null}
+        sizeBytes={sizeBytes ?? null}
+        filename={filename ?? null}
+      />
     </div>
   );
+}
+
+interface ExifPanelProps {
+  open: boolean;
+  onClose: () => void;
+  exif: PhotoExif | null;
+  dimensions: { width: number; height: number } | null;
+  sizeBytes: number | null;
+  filename: string | null;
+}
+
+/**
+ * Side panel that slides in from the right (desktop) or bottom (mobile).
+ *
+ * Renders only the EXIF fields that are present — a row with a null value
+ * is omitted so phone photos with no lens info don't render "Lens: —".
+ * The "EXIF unavailable" copy appears only when *every* field is empty.
+ */
+function ExifPanel({ open, onClose, exif, dimensions, sizeBytes, filename }: ExifPanelProps): React.JSX.Element {
+  const takenAt = exif?.taken_at ?? null;
+  const camera = exif?.camera ?? null;
+  const lens = exif?.lens ?? null;
+  const aperture = exif?.aperture ?? null;
+  const shutter = exif?.shutter ?? null;
+  const iso = exif?.iso ?? null;
+  const focal = exif?.focal_mm ?? null;
+  const hasShotSettings = aperture !== null || shutter !== null || iso !== null;
+  const hasAnyExif = camera !== null || lens !== null || hasShotSettings || focal !== null || takenAt !== null;
+  const megapixels = dimensions && dimensions.width > 0 && dimensions.height > 0
+    ? (dimensions.width * dimensions.height) / 1_000_000
+    : null;
+
+  return (
+    <>
+      {open && (
+        <div
+          aria-hidden
+          onClick={onClose}
+          className="fixed inset-0 z-30 bg-black/40 sm:bg-transparent transition-opacity duration-200"
+        />
+      )}
+      <aside
+        role="dialog"
+        aria-label="Photo info"
+        className={
+          "fixed z-40 right-0 bottom-0 left-0 sm:left-auto sm:top-0 sm:bottom-0 sm:w-[22rem] " +
+          "transform transition-transform duration-300 ease-out " +
+          "translate-y-full sm:translate-y-0 sm:translate-x-full " +
+          (open ? "!translate-y-0 sm:!translate-x-0" : "")
+        }
+      >
+        <div className="h-full bg-zinc-950/90 backdrop-blur-md border-t border-white/10 sm:border-t-0 sm:border-l sm:border-white/10 text-white shadow-2xl flex flex-col">
+          <header className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-widest text-white/40">Photo info</p>
+              {filename && (
+                <p className="mt-0.5 truncate text-sm text-white/90 font-mono">{filename}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              aria-label="Close info"
+              onClick={onClose}
+              className="h-9 w-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </header>
+
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-sm">
+            {!hasAnyExif && !dimensions && (
+              <p className="text-white/50">EXIF unavailable for this photo.</p>
+            )}
+
+            {takenAt && (
+              <ExifRow label="Taken at" value={formatTakenAt(takenAt)} />
+            )}
+            {camera && (
+              <ExifRow label="Camera" value={camera} />
+            )}
+            {lens && (
+              <ExifRow label="Lens" value={lens} />
+            )}
+            {hasShotSettings && (
+              <ExifRow
+                label="Settings"
+                value={[
+                  aperture !== null ? `f/${aperture}` : null,
+                  shutter ?? null,
+                  iso !== null ? `ISO ${iso}` : null,
+                ].filter(Boolean).join(" · ")}
+              />
+            )}
+            {focal !== null && (
+              <ExifRow label="Focal length" value={`${focal} mm`} />
+            )}
+            {dimensions && (
+              <ExifRow
+                label="Dimensions"
+                value={`${dimensions.width.toLocaleString("en-GB")} × ${dimensions.height.toLocaleString("en-GB")}${
+                  megapixels !== null ? ` · ${megapixels.toFixed(megapixels >= 10 ? 0 : 1)} MP` : ""
+                }`}
+              />
+            )}
+            {sizeBytes !== null && sizeBytes !== undefined && sizeBytes > 0 && (
+              <ExifRow label="File size" value={formatBytes(sizeBytes)} />
+            )}
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function ExifRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-widest text-white/40">{label}</span>
+      <span className="tabular-nums text-white/90">{value}</span>
+    </div>
+  );
+}
+
+function formatTakenAt(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    // Standard photographer-friendly format: "Sep 12, 2026 · 14:23".
+    const datePart = d.toLocaleDateString("en-GB", {
+      year: "numeric", month: "short", day: "numeric",
+    });
+    const timePart = d.toLocaleTimeString("en-GB", {
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    return `${datePart} · ${timePart}`;
+  } catch {
+    return iso;
+  }
 }

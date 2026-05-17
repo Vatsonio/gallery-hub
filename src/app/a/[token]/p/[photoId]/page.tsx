@@ -2,13 +2,15 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { sql } from "@/lib/db";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
-import { listPhotos, getAlbumById } from "@/lib/albums";
+import { listPhotos, getAlbumById, getAlbumWatermark } from "@/lib/albums";
 import {
   presignGet,
   contentDispositionAttachment,
-  IMMUTABLE_VARIANT_CACHE_CONTROL,
 } from "@/lib/presign";
-import { variantKey, originalKey } from "@/lib/keys";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyLarge, photoVersionSeed } from "@/lib/imgproxy";
+import { watermarkKey } from "@/lib/watermarks";
 import {
   ADMIN_PREVIEW_VIEWER_ID,
   VIEWER_COOKIE,
@@ -63,21 +65,25 @@ export default async function PublicPhotoPage({ params }: Props) {
     ? ADMIN_PREVIEW_VIEWER_ID
     : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
 
-  const [largeUrl, favIds] = await Promise.all([
-    presignGet(variantKey(album.id, photo.id, "large"), 3600, {
-      responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-    }),
-    listFavoritePhotoIds(token, viewerId),
-  ]);
+  const albumWatermark = await getAlbumWatermark(album.id);
+  const watermarkRef = albumWatermark.enabled ? { key: watermarkKey(album.id) } : null;
+
+  // Lightbox hero — imgproxy serves the largest practical resize from the
+  // original. Accept-header negotiation picks AVIF/WEBP/JPEG; no parallel
+  // <picture> source list needed.
+  const largeUrl = imgproxyLarge(
+    originalKey(album.id, photo.id, resolveOriginalExt(photo.filename)),
+    { version: photoVersionSeed(photo.updated_at), watermark: watermarkRef },
+  );
+  const favIds = await listFavoritePhotoIds(token, viewerId);
 
   let originalUrl: string | null = null;
   if (status.link.allow_download) {
     const ext = inferExt(photo.filename);
-    // Force a file download with the original filename. Without
-    // ResponseContentDisposition the browser may render the image inline
-    // (cross-origin presigned URLs make the <a download> attribute
-    // a hint that the response can override) — by setting it on the
-    // presigned URL we guarantee the Save button writes a file.
+    // Save button still pulls the untouched original from MinIO with a
+    // forced Content-Disposition — bypassing imgproxy keeps export
+    // bytes 1:1 with the uploaded file (the whole point of "save
+    // original" is to bypass any re-encoding).
     originalUrl = await presignGet(
       originalKey(album.id, photo.id, ext),
       3600,
@@ -105,6 +111,10 @@ export default async function PublicPhotoPage({ params }: Props) {
       index={idx}
       total={photos.length}
       initialFavorited={favIds.includes(photo.id)}
+      exif={photo.exif ?? null}
+      dimensions={{ width: photo.width, height: photo.height }}
+      sizeBytes={photo.orig_bytes}
+      filename={photo.filename}
     />
   );
 }

@@ -16,9 +16,11 @@ REM ============================================================
 set DB_PORT=5433
 set MINIO_PORT=9100
 set MINIO_CONSOLE_PORT=9101
+set IMGPROXY_PORT=8080
 set DEV_PORT=3000
 set PG_NAME=gh-demo-pg
 set MINIO_NAME=gh-demo-minio
+set IMGPROXY_NAME=gh-demo-imgproxy
 
 echo.
 echo === gallery-hub dev bootstrap ===
@@ -77,6 +79,68 @@ REM --- Bucket --------------------------------------------------------------
 echo [minio] ensuring bucket 'gallery' exists ...
 docker run --rm --network host -e MC_HOST_gh=http://minio:minio12345@localhost:%MINIO_PORT% ^
   minio/mc mb gh/gallery --ignore-existing >nul 2>&1
+
+REM --- imgproxy ------------------------------------------------------------
+REM On-demand image resizing replaces the pre-baked WEBP/AVIF variant pipeline.
+REM Key + salt are deterministic dev placeholders cached alongside SESSION_PASSWORD.
+REM Browsers hit imgproxy directly at http://localhost:%IMGPROXY_PORT%.
+set "IMGPROXY_KEY_FILE=.dev-imgproxy-key"
+set "IMGPROXY_SALT_FILE=.dev-imgproxy-salt"
+if not exist "%IMGPROXY_KEY_FILE%" (
+  for /f "delims=" %%K in ('node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"') do (
+    > "%IMGPROXY_KEY_FILE%" echo %%K
+  )
+)
+if not exist "%IMGPROXY_SALT_FILE%" (
+  for /f "delims=" %%S in ('node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"') do (
+    > "%IMGPROXY_SALT_FILE%" echo %%S
+  )
+)
+set /p IMGPROXY_KEY=<"%IMGPROXY_KEY_FILE%"
+set /p IMGPROXY_SALT=<"%IMGPROXY_SALT_FILE%"
+
+docker ps -a --format "{{.Names}}" | findstr /B /C:"%IMGPROXY_NAME%" >nul
+if errorlevel 1 (
+  echo [imgproxy] starting fresh imgproxy on port %IMGPROXY_PORT% ...
+  docker run -d --name %IMGPROXY_NAME% -p %IMGPROXY_PORT%:8080 ^
+    -e IMGPROXY_KEY=%IMGPROXY_KEY% ^
+    -e IMGPROXY_SALT=%IMGPROXY_SALT% ^
+    -e IMGPROXY_USE_S3=true ^
+    -e IMGPROXY_S3_ENDPOINT=http://host.docker.internal:%MINIO_PORT% ^
+    -e IMGPROXY_S3_REGION=us-east-1 ^
+    -e AWS_ACCESS_KEY_ID=minio ^
+    -e AWS_SECRET_ACCESS_KEY=minio12345 ^
+    -e IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES=true ^
+    -e IMGPROXY_ENFORCE_WEBP=true ^
+    -e IMGPROXY_ENFORCE_AVIF=false ^
+    -e IMGPROXY_QUALITY=82 ^
+    -e IMGPROXY_AVIF_SPEED=8 ^
+    -e IMGPROXY_JPEG_PROGRESSIVE=true ^
+    -e IMGPROXY_PNG_INTERLACED=true ^
+    -e IMGPROXY_CONCURRENCY=10 ^
+    -e IMGPROXY_TTL=31536000 ^
+    -e IMGPROXY_USE_ETAG=true ^
+    --add-host=host.docker.internal:host-gateway ^
+    ghcr.io/imgproxy/imgproxy:latest >nul
+) else (
+  echo [imgproxy] container exists - ensuring it's running ...
+  docker start %IMGPROXY_NAME% >nul 2>&1
+)
+
+REM Wait for imgproxy health endpoint.
+set IMG_RETRIES=0
+:imgproxy_wait
+set /a IMG_RETRIES+=1
+if %IMG_RETRIES% GTR 30 (
+  echo [WARN] imgproxy did not respond in time; gallery may fall back to placeholders.
+  goto imgproxy_done
+)
+curl -sf -o nul "http://localhost:%IMGPROXY_PORT%/health" >nul 2>&1
+if errorlevel 1 ( timeout /t 1 /nobreak >nul & goto imgproxy_wait )
+:imgproxy_done
+
+set "PUBLIC_IMGPROXY_URL=http://localhost:%IMGPROXY_PORT%"
+set "IMGPROXY_URL=http://localhost:%IMGPROXY_PORT%"
 
 REM --- App env -------------------------------------------------------------
 set "DATABASE_URL=postgresql://gallery:gallery@localhost:%DB_PORT%/gallery_hub"

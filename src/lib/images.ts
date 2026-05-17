@@ -1,3 +1,14 @@
+// LEGACY: this module used to be the heart of the pre-imgproxy derivative
+// pipeline — `generateVariants` baked WEBP thumb/web/large + AVIF web/large
+// on every upload. Since the imgproxy migration the worker is metadata-only
+// and these helpers are unreferenced on the hot path. We keep them here for:
+//   * One-shot regeneration scripts (scripts/backfill-*.ts).
+//   * Watermark PNG composition (applyWatermark → upload to
+//     watermarks/{albumId}.png so imgproxy can composite it on demand).
+//   * Possible rollback if imgproxy goes down and we need to fall back to
+//     pre-baked variants.
+// readTakenAt is still on the hot path (workers/generateDerivatives.ts) and
+// genuinely belongs here — it's an EXIF parser, not a sharp pipeline.
 import sharp from "sharp";
 import exifr from "exifr";
 
@@ -192,4 +203,107 @@ export async function readTakenAt(input: Buffer): Promise<Date | null> {
   } catch {
     return null;
   }
+}
+
+import type { PhotoExif } from "@/lib/types";
+
+/**
+ * Format a shutter time in seconds as a fraction string (e.g. "1/200")
+ * for displays. Speeds slower than 0.5s are rendered as the decimal
+ * value with a quote suffix ("2.5s"). Returns null for non-finite input.
+ */
+function formatShutter(seconds: number | null | undefined): string | null {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds >= 0.5) return `${seconds.toFixed(1)}s`;
+  // Pick the cleanest denominator: shutter speeds are conventionally
+  // labelled as "1/N" where N is the integer nearest to 1/seconds.
+  const denom = Math.round(1 / seconds);
+  return `1/${denom}`;
+}
+
+/**
+ * Extract the rich EXIF subset the lightbox panel + album stats need.
+ * Returns null when no useful fields could be recovered — the photo
+ * row's `exif` column stays NULL in that case, which the UI treats as
+ * "EXIF unavailable".
+ *
+ * Field choices:
+ *   * Camera body is joined "Make Model" with the make stripped from
+ *     the model when redundant (Canon, Nikon and Sony all duplicate the
+ *     manufacturer in the Model tag).
+ *   * Lens prefers LensModel, falling back to LensMake when LensModel
+ *     looks like a placeholder ("----" or empty).
+ *   * Aperture (`FNumber`) is captured as a float so the lightbox can
+ *     render "f/1.8" with one decimal place.
+ *   * Shutter is pre-formatted into a "1/N" or "Ns" string so the UI
+ *     doesn't have to know the convention.
+ *   * Focal length captures the actual `FocalLength` in millimetres,
+ *     not the 35mm-equivalent (the field photographers care about is
+ *     the lens marking).
+ *   * taken_at duplicates photos.taken_at into the JSONB blob so the
+ *     panel can render a "Taken at" line without an extra column read.
+ */
+export async function readPhotoExif(input: Buffer): Promise<PhotoExif | null> {
+  let meta: Record<string, unknown> | null = null;
+  try {
+    meta = (await exifr.parse(input, {
+      pick: [
+        "Make", "Model", "LensModel", "LensMake",
+        "ISO", "FNumber", "ExposureTime",
+        "FocalLength", "DateTimeOriginal", "CreateDate",
+      ],
+    })) as Record<string, unknown> | null;
+  } catch {
+    return null;
+  }
+  if (!meta) return null;
+
+  const make = typeof meta.Make === "string" ? meta.Make.trim() : null;
+  const model = typeof meta.Model === "string" ? meta.Model.trim() : null;
+  let camera: string | null = null;
+  if (model && make && !model.toLowerCase().startsWith(make.toLowerCase())) {
+    camera = `${make} ${model}`;
+  } else if (model) {
+    camera = model;
+  } else if (make) {
+    camera = make;
+  }
+
+  const lensModel = typeof meta.LensModel === "string" ? meta.LensModel.trim() : "";
+  const lensMake = typeof meta.LensMake === "string" ? meta.LensMake.trim() : "";
+  let lens: string | null = null;
+  if (lensModel && lensModel !== "----" && lensModel.length > 0) {
+    lens = lensModel;
+  } else if (lensMake) {
+    lens = lensMake;
+  }
+
+  const iso = typeof meta.ISO === "number" && Number.isFinite(meta.ISO) ? Math.round(meta.ISO) : null;
+  const aperture = typeof meta.FNumber === "number" && Number.isFinite(meta.FNumber)
+    ? Math.round(meta.FNumber * 100) / 100
+    : null;
+  const shutter = formatShutter(typeof meta.ExposureTime === "number" ? meta.ExposureTime : null);
+  const focal = typeof meta.FocalLength === "number" && Number.isFinite(meta.FocalLength)
+    ? Math.round(meta.FocalLength)
+    : null;
+  const takenAtRaw = meta.DateTimeOriginal ?? meta.CreateDate;
+  const takenAt = takenAtRaw instanceof Date && !isNaN(takenAtRaw.getTime())
+    ? takenAtRaw.toISOString()
+    : null;
+
+  // If we recovered nothing useful, bail. This is a cleaner empty state
+  // than a JSONB row with every field null.
+  if (!camera && !lens && iso === null && aperture === null && !shutter && focal === null && !takenAt) {
+    return null;
+  }
+
+  return {
+    camera,
+    lens,
+    iso,
+    aperture,
+    shutter,
+    focal_mm: focal,
+    taken_at: takenAt,
+  };
 }

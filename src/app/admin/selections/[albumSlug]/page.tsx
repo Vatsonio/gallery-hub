@@ -4,8 +4,9 @@ import { ChevronLeft, Heart } from "lucide-react";
 import { sql } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
-import { presignGet, IMMUTABLE_VARIANT_CACHE_CONTROL } from "@/lib/presign";
-import { variantKey } from "@/lib/keys";
+import { originalKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
+import { imgproxyThumb, photoVersionSeed } from "@/lib/imgproxy";
 import { favoriteCountsByPhoto } from "@/lib/favorites";
 
 export const dynamic = "force-dynamic";
@@ -40,14 +41,13 @@ export default async function SelectionsAlbumPage({
   const token = tokenRow[0]?.token ?? null;
 
   const photos = (await listPhotos(album.id)).filter((p) => p.status === "ready");
-  const tiles = await Promise.all(
-    photos.map(async (p) => ({
-      id: p.id,
-      thumbUrl: await presignGet(variantKey(album.id, p.id, "thumb"), 3600, {
-        responseCacheControl: IMMUTABLE_VARIANT_CACHE_CONTROL,
-      }),
-    })),
-  );
+  const tiles = photos.map((p) => ({
+    id: p.id,
+    thumbUrl: imgproxyThumb(
+      originalKey(album.id, p.id, resolveOriginalExt(p.filename)),
+      { version: photoVersionSeed(p.updated_at) },
+    ),
+  }));
 
   // Per-viewer heart set (when filtering) + aggregate counts for the
   // small badge under each photo.

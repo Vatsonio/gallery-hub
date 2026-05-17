@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { setCoverAction } from "@/app/admin/albums/actions";
+import { useToast } from "@/components/ui/Toast";
 
 interface PhotoOption {
   id: string;
@@ -39,6 +40,7 @@ interface Props {
  * ring; clicking another photo + confirming commits via setCoverAction.
  */
 export function CoverPickerDialog({ open, onOpenChange, slug, albumId, currentCoverId, onChanged }: Props) {
+  const toast = useToast();
   const [data, setData] = useState<ApiResp | null>(null);
   const [selected, setSelected] = useState<string | null>(currentCoverId);
   const [pending, start] = useTransition();
@@ -67,10 +69,13 @@ export function CoverPickerDialog({ open, onOpenChange, slug, albumId, currentCo
     start(async () => {
       try {
         await setCoverAction(albumId, selected);
+        toast.success("Cover updated");
         onChanged?.();
         onOpenChange(false);
       } catch (e) {
-        setErr((e as Error).message);
+        const msg = (e as Error).message;
+        setErr(msg);
+        toast.error(`Cover update failed: ${msg}`);
       }
     });
   }
@@ -120,7 +125,7 @@ export function CoverPickerDialog({ open, onOpenChange, slug, albumId, currentCo
                     aria-label="Pick this photo as cover"
                   >
                     {url ? (
-                      <Image src={url} alt="" fill sizes="160px" className="object-cover" />
+                      <Image src={url} alt="" fill sizes="160px" unoptimized className="object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500">
                         {p.status}

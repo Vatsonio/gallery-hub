@@ -15,6 +15,7 @@ import {
   listAlbumsForPickerAction,
   type AlbumSummary,
 } from "@/app/admin/albums/actions";
+import { useToast } from "@/components/ui/Toast";
 
 interface Props {
   albumId: string;
@@ -28,6 +29,7 @@ interface Props {
  * Delete and Move-to actions; Cancel clears selection.
  */
 export function BulkActionsBar({ albumId, selectedIds, onClear, onCommitted }: Props) {
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [moveOpen, setMoveOpen] = useState(false);
   const [albums, setAlbums] = useState<AlbumSummary[] | null>(null);
@@ -46,27 +48,35 @@ export function BulkActionsBar({ albumId, selectedIds, onClear, onCommitted }: P
   function doDelete() {
     setErr(null);
     if (!confirm(`Delete ${count} photo${count === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    const n = count;
     start(async () => {
       try {
         await bulkDeletePhotosAction(albumId, selectedIds);
+        toast.success(`${n} ${n === 1 ? "photo" : "photos"} deleted`);
         onCommitted();
         onClear();
       } catch (e) {
-        setErr((e as Error).message);
+        const msg = (e as Error).message;
+        setErr(msg);
+        toast.error(`Delete failed: ${msg}`);
       }
     });
   }
 
   function doMove(dstId: string) {
     setErr(null);
+    const n = count;
     start(async () => {
       try {
         await bulkMovePhotosAction(albumId, dstId, selectedIds);
         setMoveOpen(false);
+        toast.success(`${n} ${n === 1 ? "photo" : "photos"} moved`);
         onCommitted();
         onClear();
       } catch (e) {
-        setErr((e as Error).message);
+        const msg = (e as Error).message;
+        setErr(msg);
+        toast.error(`Move failed: ${msg}`);
       }
     });
   }

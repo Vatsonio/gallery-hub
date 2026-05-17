@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
+import { loadAlbumStats } from "@/lib/albumStats";
 import { StatsStrip } from "@/components/admin/StatsStrip";
 import AlbumUploadAndGrid from "@/components/admin/AlbumUploadAndGrid";
 import { AlbumSettingsPanel } from "@/components/admin/AlbumSettingsPanel";
@@ -41,8 +42,11 @@ export default async function AlbumDetailPage({ params }: Props) {
   const album = await getAlbumBySlug(slug);
   if (!album) notFound();
   const albumId = album.id;
-  const photos = await listPhotos(albumId);
-  const link = await loadShareLinkSummary(albumId);
+  const [photos, link, stats] = await Promise.all([
+    listPhotos(albumId),
+    loadShareLinkSummary(albumId),
+    loadAlbumStats(albumId),
+  ]);
 
   async function handleCreate() {
     "use server";
@@ -74,7 +78,18 @@ export default async function AlbumDetailPage({ params }: Props) {
         onCreate={handleCreate}
       />
 
-      <StatsStrip photos={photos.length} views={link?.viewCount ?? 0} favorites={link?.favoriteCount ?? 0} downloads={0} />
+      <StatsStrip
+        photos={photos.length}
+        views={link?.viewCount ?? 0}
+        favorites={link?.favoriteCount ?? 0}
+        downloads={0}
+        storageBytes={stats.storage_bytes}
+        libraryBytes={stats.library_bytes}
+        shotFrom={stats.shot_from}
+        shotTo={stats.shot_to}
+        topCamera={stats.top_camera}
+        topCameraPct={stats.top_camera_pct}
+      />
 
       <AlbumUploadAndGrid albumId={album.id} slug={album.slug} />
 

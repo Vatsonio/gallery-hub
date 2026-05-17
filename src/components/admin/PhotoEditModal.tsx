@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/Toast";
 import type { PhotoTileData } from "./PhotoTile";
 import type { PhotoEditPayload, Rotate } from "@/lib/photo-edit";
 
@@ -46,6 +47,7 @@ interface Drag {
  * only and the box-drag interaction is a hundred lines.
  */
 export function PhotoEditModal({ open, onOpenChange, photo, onSaved }: Props) {
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>("rotate");
   const [rotate, setRotate] = useState<Rotate | 0>(0);
   const [brightness, setBrightness] = useState<number>(0);
@@ -128,9 +130,12 @@ export function PhotoEditModal({ open, onOpenChange, photo, onSaved }: Props) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error ?? `edit failed: ${res.status}`);
       }
+      toast.success("Photo updated");
       onSaved();
     } catch (e) {
-      setErr((e as Error).message);
+      const msg = (e as Error).message;
+      setErr(msg);
+      toast.error(`Edit failed: ${msg}`);
     } finally {
       setPending(false);
     }

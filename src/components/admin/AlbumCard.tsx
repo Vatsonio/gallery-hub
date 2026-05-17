@@ -22,6 +22,7 @@ export function AlbumCard({ album }: { album: AlbumWithStats }) {
           alt={album.title}
           fill
           sizes="(max-width: 768px) 100vw, 33vw"
+          unoptimized
           className="object-cover transition-transform duration-300 group-hover:scale-105"
         />
       ) : (

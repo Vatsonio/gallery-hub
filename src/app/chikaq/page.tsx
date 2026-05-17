@@ -20,34 +20,43 @@ import { requireAdminSessionFromCookies } from "@/lib/session";
 import {
   loadInsightsStats,
   loadRecentActivity24h,
-  loadTopAlbums30d,
-  loadViewsTrend30d,
+  loadTileSparklines,
+  loadTopAlbums,
+  loadViewsTrend,
+  parseChikaqPeriod,
+  periodToDays,
+  type ChikaqPeriod,
   type RecentActivityRow,
   type ViewsTrendPoint,
 } from "@/lib/widgetQuery";
 import { getStorageUsage, type StorageUsage } from "@/lib/storage-monitor";
 import { logoutAction } from "@/app/admin/logout/actions";
+import { formatBytes as fmtBytes, formatCount } from "@/lib/format";
+import { AnimatedStatTile } from "@/components/chikaq/AnimatedStatTile";
+import { PeriodSwitcher } from "@/components/chikaq/PeriodSwitcher";
+import { RefreshedTimer } from "@/components/chikaq/RefreshedTimer";
+import { LiveRelativeTime } from "@/components/chikaq/LiveRelativeTime";
 
 export const dynamic = "force-dynamic";
 
+// Reuse the smart byte formatter for tooltips that still need a string
+// representation; the tile component already calls fmtBytes internally.
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const mb = bytes / 1_000_000;
-  if (mb < 1) return `${(bytes / 1000).toFixed(0)} KB`;
-  if (mb < 1000) return `${mb.toFixed(0)} MB`;
-  return `${(mb / 1000).toFixed(1)} GB`;
+  return fmtBytes(bytes);
 }
 
 /**
- * Zero-fill the 30-day window so the sparkline has 30 points, not just the
- * days that recorded a view. Keeps the trend line honest about idle days.
+ * Zero-fill the window so the sparkline has one point per day, not just
+ * the days that recorded a view. Keeps the trend line honest about idle
+ * days. Accepts a configurable number of days so the period switcher can
+ * widen the window.
  */
-function fill30Days(points: ViewsTrendPoint[]): ViewsTrendPoint[] {
+function fillDays(points: ViewsTrendPoint[], days: number): ViewsTrendPoint[] {
   const map = new Map(points.map((p) => [p.day, p.views] as const));
   const out: ViewsTrendPoint[] = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  for (let i = 29; i >= 0; i--) {
+  for (let i = days - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
     const key = d.toISOString().slice(0, 10);
@@ -59,11 +68,24 @@ function fill30Days(points: ViewsTrendPoint[]): ViewsTrendPoint[] {
 /**
  * Minimal SVG sparkline. Rendered server-side, no client JS — the dashboard
  * is admin-only so we keep its hydration cost as close to zero as we can.
+ *
+ * `gradientId` lets multiple sparklines coexist on a page without colliding
+ * on the <defs> `id` attribute. Pass a stable per-instance id from the caller.
  */
-function Sparkline({ points }: { points: ViewsTrendPoint[] }): React.JSX.Element {
+function Sparkline({
+  points,
+  label,
+  height = 80,
+  gradientId = "sparkfill",
+}: {
+  points: ViewsTrendPoint[];
+  label: string;
+  height?: number;
+  gradientId?: string;
+}): React.JSX.Element {
   const max = Math.max(1, ...points.map((p) => p.views));
   const w = 360;
-  const h = 80;
+  const h = height;
   const stepX = points.length > 1 ? w / (points.length - 1) : w;
   const coords = points.map((p, i) => {
     const x = i * stepX;
@@ -80,17 +102,17 @@ function Sparkline({ points }: { points: ViewsTrendPoint[] }): React.JSX.Element
     <svg
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="none"
-      className="w-full h-20"
+      className="w-full h-full"
       role="img"
-      aria-label="Views trend, last 30 days"
+      aria-label={label}
     >
       <defs>
-        <linearGradient id="sparkfill" x1="0" x2="0" y1="0" y2="1">
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor="#ff4d6d" stopOpacity="0.35" />
           <stop offset="100%" stopColor="#ff4d6d" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={area} fill="url(#sparkfill)" />
+      <path d={area} fill={`url(#${gradientId})`} />
       <path d={d} fill="none" stroke="#ff4d6d" strokeWidth="1.5" />
     </svg>
   );
@@ -104,8 +126,6 @@ function ActivityRow({ row }: { row: RecentActivityRow }): React.JSX.Element {
       : row.kind === "download"
         ? "text-amber-300"
         : "text-text-muted";
-  const when = new Date(row.at);
-  const ago = relativeTime(when);
   return (
     <li className="flex items-center gap-3 px-4 py-3 border-b border-line last:border-b-0 hover:bg-bg-card/40 transition">
       <Icon className={`size-4 ${tint}`} />
@@ -114,12 +134,17 @@ function ActivityRow({ row }: { row: RecentActivityRow }): React.JSX.Element {
         {row.detail ? <span className="text-text-muted"> · {row.detail}</span> : null}
       </span>
       <span className="text-sm text-text-muted">· {row.album_title}</span>
-      <span className="ml-auto text-xs text-text-muted/70 tabular-nums">{ago}</span>
+      <span className="ml-auto text-xs text-text-muted/70 tabular-nums">
+        <LiveRelativeTime iso={row.at} />
+      </span>
     </li>
   );
 }
 
 function relativeTime(d: Date): string {
+  // Retained for the StorageCard subtitle helper which uses the same
+  // tier definitions. Kept inline because formatRelativeTime accepts a
+  // Date instance directly and this thin wrapper preserves the old API.
   const diff = Date.now() - d.getTime();
   const min = Math.round(diff / 60_000);
   if (min < 1) return "just now";
@@ -130,9 +155,34 @@ function relativeTime(d: Date): string {
   return `${days}d ago`;
 }
 
-export default async function ChikaqPage(): Promise<React.JSX.Element> {
+interface PageProps {
+  // Next.js 15 passes searchParams as a Promise to async server components.
+  searchParams?: Promise<{ period?: string }>;
+}
+
+function periodLabel(period: ChikaqPeriod): string {
+  switch (period) {
+    case "7d": return "Last 7 days";
+    case "30d": return "Last 30 days";
+    case "90d": return "Last 90 days";
+    case "all": return "All time";
+  }
+}
+
+function sparklineDaysFor(period: ChikaqPeriod): number {
+  // The "all" case is capped to 365 days client-side; sparklines need a
+  // bounded zero-fill window so they don't try to render thousands of bars.
+  const days = periodToDays(period);
+  return days ?? 90;
+}
+
+export default async function ChikaqPage({ searchParams }: PageProps): Promise<React.JSX.Element> {
   const auth = await requireAdminSessionFromCookies();
   if (!auth.ok) redirect("/admin/login?next=/chikaq");
+
+  const sp = (await searchParams) ?? {};
+  const period: ChikaqPeriod = parseChikaqPeriod(sp.period ?? null);
+  const days = periodToDays(period);
 
   // Storage usage walks the bucket — guard it so a slow/broken MinIO can't
   // 500 the whole dashboard. Failure → null and the Storage card renders a
@@ -141,24 +191,27 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
     console.error("[chikaq] storage usage failed", err);
     return null;
   });
-  const [stats, trendRaw, topAlbums, activity, storage] = await Promise.all([
+  const [stats, trendRaw, topAlbums, activity, storage, tileSeries] = await Promise.all([
     loadInsightsStats(),
-    loadViewsTrend30d(),
-    loadTopAlbums30d(5),
+    loadViewsTrend(days),
+    loadTopAlbums(5, days),
     loadRecentActivity24h(20),
     storagePromise,
+    loadTileSparklines(days),
   ]);
-  const trend = fill30Days(trendRaw);
+  const fillCount = sparklineDaysFor(period);
+  const trend = fillDays(trendRaw, fillCount);
   const totalViews = trend.reduce((s, p) => s + p.views, 0);
-  const prev15 = trend.slice(0, 15).reduce((s, p) => s + p.views, 0);
-  const last15 = trend.slice(15).reduce((s, p) => s + p.views, 0);
-  const deltaPct = prev15 === 0 ? null : Math.round(((last15 - prev15) / prev15) * 100);
+  // Window-relative comparison: split the filled trend in half and compare
+  // the back half against the front half. For "7d" that's "last 4 days vs
+  // prior 3"; for "all" we use whatever was filled.
+  const half = Math.floor(trend.length / 2);
+  const prevHalf = trend.slice(0, half).reduce((s, p) => s + p.views, 0);
+  const lastHalf = trend.slice(half).reduce((s, p) => s + p.views, 0);
+  const deltaPct = prevHalf === 0 ? null : Math.round(((lastHalf - prevHalf) / prevHalf) * 100);
 
   const dashboardUrl = process.env.POSTHOG_DASHBOARD_URL ?? "";
-  const refreshedAt = new Date().toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const renderedAtIso = new Date().toISOString();
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -170,8 +223,10 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
             <h1 className="text-xl font-light tracking-tight">
               Привіт, Chikaq
             </h1>
-            <p className="text-xs text-text-muted">
-              Last 30 days · refreshed {refreshedAt}
+            <p className="mt-1 flex items-center gap-3 text-xs text-text-muted">
+              <span>{periodLabel(period)}</span>
+              <span aria-hidden>·</span>
+              <RefreshedTimer renderedAtIso={renderedAtIso} />
             </p>
           </div>
           <Link
@@ -201,28 +256,61 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-8 space-y-8">
-        {/* Stat tiles */}
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium uppercase tracking-widest text-text-muted">Overview</h2>
+          <PeriodSwitcher defaultPeriod="30d" />
+        </div>
+        {/* Stat tiles — animated count-up on mount, sparklines beneath. */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Tile
+          <AnimatedStatTile
             label="Albums"
-            value={stats.albums_total.toString()}
+            value={stats.albums_total}
             Icon={Images}
+            emptyHint="No albums yet"
           />
-          <Tile
+          <AnimatedStatTile
             label="Photos"
-            value={stats.photos_total.toLocaleString()}
+            value={stats.photos_total}
             Icon={Camera}
+            sparkline={
+              <Sparkline
+                points={fillDays(tileSeries.photos, fillCount)}
+                label="Photos created"
+                height={32}
+                gradientId="sparkfill-photos"
+              />
+            }
+            emptyHint="No photos yet"
           />
-          <Tile
+          <AnimatedStatTile
             label="Storage"
-            value={formatBytes(stats.storage_bytes)}
+            value={stats.storage_bytes}
+            asBytes
             Icon={HardDrive}
+            sparkline={
+              <Sparkline
+                points={fillDays(tileSeries.storage, fillCount)}
+                label="Storage growth"
+                height={32}
+                gradientId="sparkfill-storage"
+              />
+            }
+            emptyHint="No data"
           />
-          <Tile
-            label="Views (30d)"
-            value={totalViews.toLocaleString()}
-            Icon={Eye}
+          <AnimatedStatTile
+            label={`Views (${period})`}
+            value={totalViews}
             accent
+            Icon={Eye}
+            sparkline={
+              <Sparkline
+                points={trend}
+                label="Views trend"
+                height={32}
+                gradientId="sparkfill-views"
+              />
+            }
+            emptyHint="No views yet — share a link to start tracking"
           />
         </section>
 
@@ -233,19 +321,23 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
             subtitle={
               deltaPct === null
                 ? "no baseline yet"
-                : `${deltaPct >= 0 ? "↑" : "↓"} ${Math.abs(deltaPct)}% vs prior 15 days`
+                : `${deltaPct >= 0 ? "↑" : "↓"} ${Math.abs(deltaPct)}% vs prior half`
             }
             Icon={TrendingUp}
           >
-            <Sparkline points={trend} />
+            <div className="h-20">
+              <Sparkline points={trend} label={`Views, ${periodLabel(period)}`} height={80} gradientId="sparkfill-large" />
+            </div>
             <p className="mt-2 text-2xl font-light text-text">
-              {totalViews.toLocaleString()}{" "}
+              {formatCount(totalViews)}{" "}
               <span className="text-sm text-text-muted">page views</span>
             </p>
           </Panel>
           <Panel title="Top albums by views" Icon={Eye}>
             {topAlbums.length === 0 ? (
-              <p className="text-sm text-text-muted">No views recorded yet.</p>
+              <p className="text-sm text-text-muted">
+                No views recorded yet — share a link to start tracking.
+              </p>
             ) : (
               <ul className="space-y-2">
                 {topAlbums.map((a) => {
@@ -255,11 +347,11 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
                     <li key={a.album_id} className="space-y-1">
                       <div className="flex items-center justify-between text-sm">
                         <span className="truncate pr-3 text-text/90">{a.title}</span>
-                        <span className="tabular-nums text-text-muted">{a.views}</span>
+                        <span className="tabular-nums text-text-muted">{formatCount(a.views)}</span>
                       </div>
                       <div className="h-1.5 rounded-full bg-bg-card overflow-hidden">
                         <div
-                          className="h-full bg-rose-accent/80"
+                          className="h-full bg-rose-accent/80 transition-[width] duration-500 ease-out"
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -352,39 +444,8 @@ export default async function ChikaqPage(): Promise<React.JSX.Element> {
   );
 }
 
-function Tile({
-  label,
-  value,
-  Icon,
-  accent,
-}: {
-  label: string;
-  value: string;
-  Icon: typeof Camera;
-  accent?: boolean;
-}): React.JSX.Element {
-  return (
-    <div className="rounded-xl border border-line bg-bg-elevated p-4 flex items-center gap-3">
-      <div
-        className={`rounded-lg p-2 ${
-          accent ? "bg-rose-accent/15 text-rose-accent" : "bg-bg-card text-text-muted"
-        }`}
-      >
-        <Icon className="size-4" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-widest text-text-muted">{label}</p>
-        <p
-          className={`text-xl font-light truncate ${
-            accent ? "text-rose-accent" : "text-text"
-          }`}
-        >
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-}
+// Tile was replaced by AnimatedStatTile (client component, animated count-up
+// with optional sparkline). The old Tile is intentionally removed.
 
 function formatRelativeTimestamp(iso: string | null): string {
   if (!iso) return "never";
