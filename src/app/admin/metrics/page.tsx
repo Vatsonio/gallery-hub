@@ -18,6 +18,7 @@ import {
   getRecentExports,
   getSystemHealth,
 } from "@/lib/metrics";
+import { getDiskInfo, type DiskRow } from "@/lib/disk-info";
 import { formatBytes, formatCount, formatRelativeTime } from "@/lib/format";
 import { MetricsKpiTile } from "@/components/admin/MetricsKpiTile";
 import { MetricsSparkline } from "@/components/admin/MetricsSparkline";
@@ -44,13 +45,14 @@ function formatAbsolute(iso: string | null): string {
 export default async function MetricsPage(): Promise<React.JSX.Element> {
   await requireOwner();
 
-  const [storage, views, favorites, topAlbums, recentExports, health] = await Promise.all([
+  const [storage, views, favorites, topAlbums, recentExports, health, disks] = await Promise.all([
     getStorageMetrics(),
     getViewsMetrics(),
     getFavoritesMetrics(),
     getTopAlbums(10),
     getRecentExports(20),
     getSystemHealth(),
+    getDiskInfo(),
   ]);
 
   const delta = pctDelta(views.views7d, views.views7dPrior);
@@ -334,6 +336,88 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
           </ul>
         </div>
       </section>
+
+      {/* Section F — Filesystems visible to the gallery-app process */}
+      <section className="mt-8">
+        <h2 className="text-sm uppercase tracking-widest text-text-muted mb-3">
+          Filesystems
+        </h2>
+        <DiskTable rows={disks} />
+        <p className="mt-3 text-[11px] text-text-muted">
+          What the gallery-app container sees. Mounted Docker volumes appear here when
+          they are bind-mounted into the container — overlay-only paths are pseudo
+          and hidden. On a Proxmox LXC without Docker this is the host's full mount
+          table.
+        </p>
+      </section>
     </div>
+  );
+}
+
+function DiskTable({ rows }: { rows: DiskRow[] }): React.JSX.Element {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-2xl border border-line bg-bg-elevated p-6 text-sm text-text-muted">
+        No filesystem info available in this runtime — df isn&apos;t on PATH and
+        statfs() returned nothing. On Linux prod this should populate; on Windows
+        dev it&apos;s expected to be empty.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-line bg-bg-elevated">
+      <table className="w-full text-sm">
+        <thead className="bg-bg-card text-text-muted text-xs uppercase tracking-widest">
+          <tr>
+            <th className="px-4 py-2 text-left">Mount</th>
+            <th className="px-4 py-2 text-left">Source</th>
+            <th className="px-4 py-2 text-left">FS</th>
+            <th className="px-4 py-2 text-right">Size</th>
+            <th className="px-4 py-2 text-right">Used</th>
+            <th className="px-4 py-2 text-right">Free</th>
+            <th className="px-4 py-2 text-left">Usage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <DiskRowView key={`${r.source}|${r.mount}`} row={r} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DiskRowView({ row }: { row: DiskRow }): React.JSX.Element {
+  const meterColor =
+    row.usePct >= 95
+      ? "bg-rose-500"
+      : row.usePct >= 80
+        ? "bg-amber-500"
+        : "bg-emerald-500";
+  return (
+    <tr className="border-t border-line">
+      <td className="px-4 py-2 font-mono text-xs">{row.mount}</td>
+      <td className="px-4 py-2 font-mono text-xs text-text-muted truncate max-w-[18rem]">
+        {row.source}
+      </td>
+      <td className="px-4 py-2 text-xs text-text-muted">{row.fstype}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{formatBytes(row.totalBytes)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{formatBytes(row.usedBytes)}</td>
+      <td className="px-4 py-2 text-right tabular-nums text-text-muted">
+        {formatBytes(row.availBytes)}
+      </td>
+      <td className="px-4 py-2">
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-24 rounded-full bg-bg-card overflow-hidden">
+            <div
+              className={`h-full ${meterColor}`}
+              style={{ width: `${Math.min(100, row.usePct)}%` }}
+            />
+          </div>
+          <span className="text-xs tabular-nums text-text-muted">{row.usePct}%</span>
+        </div>
+      </td>
+    </tr>
   );
 }
