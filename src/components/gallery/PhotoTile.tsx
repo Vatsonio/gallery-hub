@@ -108,10 +108,16 @@ export default function PhotoTile({
   // splash for tiles the user can't see.
   const isAboveFold = priority === "high";
   // Browser hints — see the Props.priority docblock for the matrix.
+  //
+  // IMPORTANT: cover hero is the ONLY resource on the page tagged
+  // fetchPriority="high". Grid tiles — even above-the-fold — get "low"
+  // so the cover wins the HTTP/1.1 6-per-origin connection race. Tiles
+  // still load eagerly (no waiting for scroll); they just yield slot 1
+  // to the cover. Without this, the cover competes with 32 high-prio
+  // tiles and arrives several seconds late.
   const loadingHint = priority === "lazy" ? "lazy" : "eager";
-  const decodingHint = priority === "high" ? "sync" : "async";
-  const fetchPriorityHint =
-    priority === "high" ? "high" : priority === "low" ? "low" : "auto";
+  const decodingHint = priority === "high" ? "async" : "async";
+  const fetchPriorityHint = priority === "lazy" ? "auto" : "low";
   const router = useRouter();
   const [favorited, setFavorited] = useState(initialFavorited);
   const [burst, setBurst] = useState(0);

@@ -205,33 +205,20 @@ export interface SplashDismissInputs {
 }
 
 export function shouldDismissSplash(inputs: SplashDismissInputs): boolean {
-  const {
-    enabled,
-    counter,
-    msSinceMount,
-    minVisibleMs,
-    hardTimeoutMs,
-    criticalTileTarget,
-  } = inputs;
+  const { enabled, counter, msSinceMount, minVisibleMs, hardTimeoutMs } =
+    inputs;
   // Empty album / disabled page — there's no splash content to wait for.
   if (!enabled) return true;
   // Hard ceiling — never trap the user behind a frozen splash.
   if (msSinceMount >= hardTimeoutMs) return true;
   if (msSinceMount < minVisibleMs) return false;
-  // Cover gate: if a cover was registered, it must have loaded.
+  // Cover-only gate. Grid tiles are intentionally low-priority and will
+  // fade in after the splash dismisses — the splash is here to hide the
+  // moment of arrival of the COVER, not the whole grid. If no cover was
+  // registered (album with no photos), the enabled/min-time gates above
+  // already covered the legitimate exit path.
   if (counter.coverRegistered && !counter.coverLoaded) return false;
-  // Tile gate: how many above-the-fold tiles must land. If the album
-  // has fewer registered than the target (small album), drop the target
-  // down to "all of them" so we don't wait forever.
-  if (counter.registered === 0) {
-    // No tiles registered yet — wait for at least the cover (handled
-    // above) and the minimum visible time (handled above). If we get
-    // here with `registered === 0` past the min time, we can dismiss
-    // (album with cover only, or page that never registered tiles).
-    return true;
-  }
-  const target = Math.min(criticalTileTarget, counter.registered);
-  return counter.loaded >= target;
+  return true;
 }
 
 export interface PhotoLoadProgressApi {
