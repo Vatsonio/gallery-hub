@@ -14,6 +14,12 @@ export interface ExportOption {
   title: string;
   subtitle: string;
   bytes: number;
+  /**
+   * Prefix the size with "≈" — set for variants whose final ZIP size
+   * we don't know until imgproxy renders (currently the web variant,
+   * an estimate of ~22% of the originals).
+   */
+  approxBytes?: boolean;
   /** Disable selection (e.g. zero favorites). */
   disabled?: boolean;
 }
@@ -197,7 +203,10 @@ export default function ExportModal({
                   <div className="text-white text-sm font-medium">{opt.title}</div>
                   <div className="text-neutral-400 text-xs mt-0.5">{opt.subtitle}</div>
                 </div>
-                <div className="text-neutral-500 text-xs tabular-nums">{fmtBytes(opt.bytes)}</div>
+                <div className="text-neutral-500 text-xs tabular-nums">
+                  {opt.approxBytes && opt.bytes > 0 ? "≈ " : ""}
+                  {fmtBytes(opt.bytes)}
+                </div>
               </button>
             );
           })}

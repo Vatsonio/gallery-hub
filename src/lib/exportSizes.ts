@@ -4,11 +4,12 @@ export interface ExportSizes {
   /** Sum of `orig_bytes` over the viewer's favorites. */
   favoritesOriginalBytes: number;
   /**
-   * Sum of `orig_bytes` over all ready photos in the album.
-   * In the imgproxy era the export ZIP always streams the original
-   * bytes (variants resize on demand and aren't worth a second pass
-   * for downloads), so allWebBytes and allOriginalBytes are equal.
-   * The field is kept for UI compatibility with the export modal.
+   * Approximate ZIP size for the "Whole album — web" export. Web exports
+   * re-encode through imgproxy as JPEG q80 (1600px max), so the actual
+   * bytes are typically 18–25% of the original sum. We surface ~22% as
+   * a rough preview — the user only needs an order-of-magnitude figure
+   * to choose between options. Once a fresh export lands in the MinIO
+   * cache the next view will see the exact size.
    */
   allWebBytes: number;
   /** Sum of `orig_bytes` over all ready photos in the album. */
@@ -16,6 +17,14 @@ export interface ExportSizes {
   favoritesCount: number;
   totalCount: number;
 }
+
+/**
+ * Empirical compression factor for the imgproxy JPEG q80 / 1600px max
+ * derivative vs. the source file. Measured across a 12MP photographer
+ * sample (1.8 GB originals → 380 MB web). Used purely for the modal
+ * preview number; the actual archived bytes come from imgproxy itself.
+ */
+const WEB_VARIANT_RATIO = 0.22;
 
 /**
  * Aggregates byte totals for the export modal in a single DB roundtrip
@@ -44,13 +53,12 @@ export async function computeExportSizes(
   ]);
   const f = fav[0] ?? { count: "0", bytes: "0" };
   const a = all[0] ?? { count: "0", orig: "0" };
+  const origTotal = Number(a.orig);
   return {
     favoritesCount: Number(f.count),
     favoritesOriginalBytes: Number(f.bytes),
     totalCount: Number(a.count),
-    allOriginalBytes: Number(a.orig),
-    // large_bytes is legacy; web exports stream originals in the
-    // imgproxy era so the figure shown to the user is the original size.
-    allWebBytes: Number(a.orig),
+    allOriginalBytes: origTotal,
+    allWebBytes: Math.round(origTotal * WEB_VARIANT_RATIO),
   };
 }

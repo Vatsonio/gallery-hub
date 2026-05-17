@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { sql } from "@/lib/db";
@@ -19,6 +20,7 @@ import {
 } from "@/lib/exportCache";
 import { createFanOutZip, type ZipEntry } from "@/lib/zipStream";
 import { variantKey } from "@/lib/keys";
+import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
 import { createRateLimiter } from "@/lib/rateLimiter";
@@ -81,6 +83,20 @@ interface PhotoRow {
   id: string;
   filename: string;
   sort_order: number;
+  /** Used to derive the imgproxy cachebuster for the web-variant export. */
+  updated_at: string | null;
+}
+
+/**
+ * Strip the source filename's extension and append ".jpg". Web-variant
+ * exports always re-encode through imgproxy as JPEG q80 (1600px max), so
+ * the file inside the ZIP should advertise the new extension — naming a
+ * JPEG `.heic` would confuse downstream tools and the macOS Finder.
+ */
+function jpegFilename(original: string): string {
+  const dot = original.lastIndexOf(".");
+  const stem = dot < 0 ? original : original.slice(0, dot);
+  return `${stem}.jpg`;
 }
 
 export async function GET(
@@ -170,7 +186,7 @@ export async function GET(
   let photos: PhotoRow[];
   if (scope === "favorites") {
     photos = await sql<PhotoRow[]>`
-      SELECT p.id, p.filename, p.sort_order
+      SELECT p.id, p.filename, p.sort_order, p.updated_at::text AS updated_at
         FROM favorites f
         JOIN photos p ON p.id = f.photo_id
        WHERE f.share_token = ${token} AND f.viewer_id = ${viewerId}
@@ -178,7 +194,7 @@ export async function GET(
     `;
   } else {
     photos = await sql<PhotoRow[]>`
-      SELECT id, filename, sort_order FROM photos
+      SELECT id, filename, sort_order, updated_at::text AS updated_at FROM photos
        WHERE album_id = ${status.link.album_id} AND status = 'ready'
        ORDER BY sort_order ASC, created_at ASC
     `;
@@ -277,22 +293,50 @@ export async function GET(
 
   // Build a fresh ZIP and fan out to both the HTTP response and MinIO.
   //
-  // imgproxy era: variants no longer pre-exist in MinIO (imgproxy resizes
-  // on demand). For both `variant=original` and `variant=web` we stream
-  // the original bytes — routing the export through imgproxy would waste
-  // an extra encode pass per photo, and "web" exports are rare enough
-  // that the size delta isn't worth it. The query-string still accepts
-  // `variant=web` for backwards compatibility with existing share-link
-  // URLs; it just maps to the same keys.
+  // imgproxy era:
+  //   - variant="original": stream the raw MinIO bytes (no re-encode).
+  //   - variant="web":      pipe each photo through imgproxy's signed URL
+  //                         (1600 max, JPEG q80). The cachebuster matches
+  //                         what the public gallery page uses so a fresh
+  //                         export rides the existing imgproxy cache —
+  //                         second-time exports hit warm bytes per photo.
+  // We use the server-side IMGPROXY_URL (falls back to PUBLIC_IMGPROXY_URL
+  // inside buildImgproxyUrl) so the export traffic stays on the internal
+  // network instead of bouncing out through Cloudflare.
   const albumId = status.link.album_id;
   async function* gen(): AsyncGenerator<ZipEntry> {
     for (const p of photos) {
       const key = originalKeyForPhoto(albumId, p.id, p.filename);
-      const body = await getObjectStream(key);
-      yield {
-        name: `${String(p.sort_order + 1).padStart(3, "0")}-${p.filename}`,
-        body,
-      };
+      const prefix = String(p.sort_order + 1).padStart(3, "0");
+      if (variant === "web") {
+        const url = imgproxyWeb(key, { version: photoVersionSeed(p.updated_at) });
+        const res = await fetch(url, {
+          headers: {
+            // Force JPEG response: prod imgproxy has IMGPROXY_ENFORCE_WEBP=true
+            // which auto-upgrades to WebP whenever the Accept header lists it.
+            // The URL extension .jpg already pins format=jpg, but a JPEG-only
+            // Accept removes any ambiguity (and matches what the user expects
+            // when they pick the "web size" export).
+            accept: "image/jpeg",
+            "user-agent": "gallery-hub-export/1",
+          },
+        });
+        if (!res.ok || !res.body) {
+          throw new Error(
+            `[export-web] imgproxy returned HTTP ${res.status} for photo ${p.id}`,
+          );
+        }
+        yield {
+          name: `${prefix}-${jpegFilename(p.filename)}`,
+          body: Readable.fromWeb(res.body as unknown as import("node:stream/web").ReadableStream),
+        };
+      } else {
+        const body = await getObjectStream(key);
+        yield {
+          name: `${prefix}-${p.filename}`,
+          body,
+        };
+      }
     }
   }
   // variantKey is no longer reached for export streaming; reference it

@@ -95,7 +95,12 @@ export default function GalleryShell({
         variant: "original",
         icon: Heart,
         title: "Favorites — originals",
-        subtitle: `${exportSizes.favoritesCount} photo${exportSizes.favoritesCount === 1 ? "" : "s"} · full quality`,
+        subtitle:
+          exportSizes.favoritesCount === 0
+            ? isAdminPreview
+              ? "Admin preview — open the link in incognito to like photos"
+              : "Like some photos first to enable this export"
+            : `${exportSizes.favoritesCount} photo${exportSizes.favoritesCount === 1 ? "" : "s"} · full quality`,
         bytes: exportSizes.favoritesOriginalBytes,
         disabled: exportSizes.favoritesCount === 0,
       },
@@ -105,8 +110,9 @@ export default function GalleryShell({
         variant: "web",
         icon: ImageIcon,
         title: "Whole album — web size",
-        subtitle: `${exportSizes.totalCount} photo${exportSizes.totalCount === 1 ? "" : "s"} · 2400px max`,
+        subtitle: `${exportSizes.totalCount} photo${exportSizes.totalCount === 1 ? "" : "s"} · 1600px · JPEG q80`,
         bytes: exportSizes.allWebBytes,
+        approxBytes: true,
         disabled: exportSizes.totalCount === 0,
       },
       {
@@ -120,7 +126,7 @@ export default function GalleryShell({
         disabled: exportSizes.totalCount === 0,
       },
     ],
-    [exportSizes],
+    [exportSizes, isAdminPreview],
   );
 
   // No floating CTA anymore. Both whole-album and favorites exports are
