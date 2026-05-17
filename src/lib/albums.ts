@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { variantKey, avifVariantKey, originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";
 import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
-import { s3Client, BUCKET } from "@/lib/minio";
+import { s3Client, BUCKET, deleteObjectsByPrefix, deleteObject } from "@/lib/minio";
+import { watermarkKey } from "@/lib/watermarks";
 import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoExif, PhotoRow } from "@/lib/types";
 
 function slugify(input: string): string {
@@ -104,6 +105,95 @@ export async function listSoftDeletedAlbumIds(): Promise<string[]> {
 export async function hardDeleteAlbum(id: string): Promise<void> {
   await sql`DELETE FROM photos WHERE album_id = ${id}`;
   await sql`DELETE FROM albums WHERE id = ${id}`;
+}
+
+export interface PurgeResult {
+  /** S3 objects under albums/<id>/ that were deleted (originals + any cached variants). */
+  s3ObjectsDeleted: number;
+  /** Bytes reported by SUM(orig_bytes) on the DB-side photos before delete. */
+  bytesFreed: number;
+  /** Photo rows deleted. */
+  photosDeleted: number;
+  /** Watermark file reaped (if any). */
+  watermarkDeleted: boolean;
+}
+
+/**
+ * Wipe an album AND its storage. Walks every MinIO object under
+ * `albums/<albumId>/`, the watermark stamp at `watermarks/<albumId>.png`,
+ * and the photos + albums DB rows. Safe to call on an already-soft-deleted
+ * album (the lookup ignores `deleted_at`).
+ *
+ * Order is intentional: S3 first, DB second. A storage-side failure leaves
+ * the DB row in place so the next purge attempt can retry; the alternative
+ * (DB first, S3 second) would orphan objects with no row pointing at them.
+ */
+export async function purgeAlbumStorage(albumId: string): Promise<PurgeResult> {
+  const before = await sql<{ bytes: string; n: string }[]>`
+    SELECT COALESCE(SUM(orig_bytes), 0)::text AS bytes,
+           COUNT(*)::text AS n
+      FROM photos WHERE album_id = ${albumId}
+  `;
+  const bytesFreed = Number(before[0]?.bytes ?? "0");
+  const photosDeleted = Number(before[0]?.n ?? "0");
+
+  const s3ObjectsDeleted = await deleteObjectsByPrefix(`albums/${albumId}/`);
+
+  let watermarkDeleted = false;
+  const wmKey = watermarkKey(albumId);
+  await deleteObject(wmKey).then(() => {
+    watermarkDeleted = true;
+  });
+
+  await sql`DELETE FROM photos WHERE album_id = ${albumId}`;
+  await sql`DELETE FROM albums WHERE id = ${albumId}`;
+
+  return { s3ObjectsDeleted, bytesFreed, photosDeleted, watermarkDeleted };
+}
+
+/**
+ * Wipe every album currently flagged `deleted_at IS NOT NULL`. Returns the
+ * aggregate result so the caller can surface "freed X MB across Y albums"
+ * after a one-click trash purge from /admin/settings.
+ */
+export async function purgeSoftDeletedAlbums(): Promise<{
+  albumsPurged: number;
+  totalBytesFreed: number;
+  totalPhotosDeleted: number;
+  totalS3ObjectsDeleted: number;
+}> {
+  const ids = await listSoftDeletedAlbumIds();
+  let totalBytesFreed = 0;
+  let totalPhotosDeleted = 0;
+  let totalS3ObjectsDeleted = 0;
+  for (const id of ids) {
+    const r = await purgeAlbumStorage(id);
+    totalBytesFreed += r.bytesFreed;
+    totalPhotosDeleted += r.photosDeleted;
+    totalS3ObjectsDeleted += r.s3ObjectsDeleted;
+  }
+  return {
+    albumsPurged: ids.length,
+    totalBytesFreed,
+    totalPhotosDeleted,
+    totalS3ObjectsDeleted,
+  };
+}
+
+/**
+ * Delete one or more photos from MinIO (originals + cached variants under
+ * the photo's prefix). Used by `deletePhoto` / `bulkDeletePhotos` after the
+ * DB rows are removed. Each photo's storage lives under
+ * `albums/<albumId>/<photoId>/` — the original file plus any orphan
+ * variant blobs left over from the pre-imgproxy era.
+ */
+export async function deletePhotoStorage(albumId: string, photoIds: string[]): Promise<number> {
+  if (photoIds.length === 0) return 0;
+  let n = 0;
+  for (const id of photoIds) {
+    n += await deleteObjectsByPrefix(`albums/${albumId}/${id}/`);
+  }
+  return n;
 }
 
 export interface InsertPhotoInput {

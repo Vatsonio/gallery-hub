@@ -2,9 +2,11 @@
 import { revalidatePath } from "next/cache";
 import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import {
-  createAlbum, updateAlbum, softDeleteAlbum,
+  createAlbum, updateAlbum,
+  purgeAlbumStorage, purgeSoftDeletedAlbums,
   setCover, reorderPhotos, deletePhoto,
   bulkDeletePhotos, bulkMovePhotos,
+  deletePhotoStorage,
   listPhotoIdsForRegeneration, getAlbumById,
   listAlbums,
 } from "@/lib/albums";
@@ -64,12 +66,32 @@ export async function updateAlbumAction(id: string, patch: {
 
 export async function softDeleteAlbumAction(id: string): Promise<void> {
   await gate();
-  // Capture share tokens before soft-delete so the prerender is purged
-  // even after the row vanishes from listShareTokensForAlbum.
+  // "Soft delete" is now immediate purge — MinIO objects + DB rows go away
+  // together so the photographer's storage quota reflects reality. The
+  // name is kept for back-compat with the AlbumForm client component.
   const tokens = await listShareTokensForAlbum(id);
-  await softDeleteAlbum(id);
+  await purgeAlbumStorage(id);
   revalidatePath("/admin/albums");
   for (const t of tokens) revalidatePath(`/a/${t}`);
+}
+
+/**
+ * Reap every album that's still flagged `deleted_at IS NOT NULL` from the
+ * previous soft-delete-only era. Wipes their MinIO objects + DB rows.
+ * Returns the aggregate so the UI can surface "freed X MB across Y albums".
+ */
+export async function purgeSoftDeletedAlbumsAction(): Promise<{
+  albumsPurged: number;
+  totalBytesFreed: number;
+  totalPhotosDeleted: number;
+  totalS3ObjectsDeleted: number;
+}> {
+  await gate();
+  const r = await purgeSoftDeletedAlbums();
+  revalidatePath("/admin/albums");
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/metrics");
+  return r;
 }
 
 export async function setCoverAction(albumId: string, photoId: string): Promise<void> {
@@ -87,19 +109,21 @@ export async function reorderPhotosAction(albumId: string, orderedIds: string[])
 
 export async function deletePhotoAction(photoId: string): Promise<void> {
   await gate();
-  // Look up the album_id before delete so we can invalidate the right
-  // share-link prerenders.
   const rows = await sql<{ album_id: string }[]>`
     SELECT album_id FROM photos WHERE id = ${photoId} LIMIT 1
   `;
   const albumId = rows[0]?.album_id;
   await deletePhoto(photoId);
-  if (albumId) await revalidateAlbumTokens(albumId);
+  if (albumId) {
+    await deletePhotoStorage(albumId, [photoId]);
+    await revalidateAlbumTokens(albumId);
+  }
 }
 
 export async function bulkDeletePhotosAction(albumId: string, photoIds: string[]): Promise<void> {
   await gate();
   await bulkDeletePhotos(albumId, photoIds);
+  await deletePhotoStorage(albumId, photoIds);
   revalidatePath("/admin/albums");
   await revalidateAlbumTokens(albumId);
 }

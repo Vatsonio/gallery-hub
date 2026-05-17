@@ -18,6 +18,8 @@ import {
 } from "@/lib/settings";
 import { getStorageUsage } from "@/lib/storage-usage";
 import { StorageUsageMeter } from "@/components/admin/StorageUsageMeter";
+import { listSoftDeletedAlbumIds } from "@/lib/albums";
+import { TrashPurgeButton } from "@/components/admin/TrashPurgeButton";
 import {
   saveStorageSettings,
   saveRetentionSettings,
@@ -85,9 +87,10 @@ export default async function SettingsPage({
 }: PageProps): Promise<React.JSX.Element> {
   await requireOwner();
   const sp = await searchParams;
-  const [settings, usage] = await Promise.all([
+  const [settings, usage, trashedIds] = await Promise.all([
     loadSettings(),
     getStorageUsage(),
+    listSoftDeletedAlbumIds(),
   ]);
 
   const maxBytes = settings.storage.max_gb * 1_000_000_000;
@@ -185,6 +188,7 @@ export default async function SettingsPage({
             </button>
           </div>
         </form>
+        <TrashPurgeButton initialCount={trashedIds.length} />
       </section>
 
       {/* Retention */}
