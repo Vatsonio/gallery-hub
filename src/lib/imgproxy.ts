@@ -252,32 +252,34 @@ export function photoVersionSeed(updated: string | number | Date | null | undefi
 // ---------------------------------------------------------------------------
 
 /**
- * Small grid thumbnail. 400×400 fit, q75. Hot path on the public landing —
- * the browser asks for one per tile in the justified-rows layout.
+ * Small grid thumbnail. 400×400 fit, JPEG q80 — per user request, web-tier
+ * variants ship as JPEG (not WEBP/AVIF) for predictable visual rendering
+ * across all clients. Originals stay untouched on the export path.
  */
 export function imgproxyThumb(s3Key: string, opts: Partial<ImgproxyOptions> = {}): string {
   return buildImgproxyUrl(s3Key, {
     width: 400,
     height: 400,
     resize: "fit",
-    quality: 75,
-    format: "auto",
+    quality: 80,
+    format: "jpg",
     ...opts,
   });
 }
 
 /**
- * Web-sized variant for lightbox / desktop tiles. 1600×1600 fit, q82 — the
- * historical sweet spot for WEBP delivery; AVIF lands ~half the bytes at
- * the same perceived quality.
+ * Web-sized variant for grid tiles + non-hero lightbox use. 1600×1600 fit,
+ * JPEG q80 — per user request, web-tier variants ship as JPEG (not WEBP /
+ * AVIF) for predictable visual rendering across all clients. Originals stay
+ * untouched on the export path.
  */
 export function imgproxyWeb(s3Key: string, opts: Partial<ImgproxyOptions> = {}): string {
   return buildImgproxyUrl(s3Key, {
     width: 1600,
     height: 1600,
     resize: "fit",
-    quality: 82,
-    format: "auto",
+    quality: 80,
+    format: "jpg",
     ...opts,
   });
 }
@@ -325,14 +327,12 @@ export interface ImgproxySrcsetResult {
 }
 
 /**
- * Per-width quality tuning. Thumbnails benefit from lower quality (less
- * detail to preserve), the web variant gets the historical q82 sweet
- * spot, and larger variants creep up to q86 to keep grain.
+ * Per-width quality tuning. Web-tier variants (≤1600w) ship JPEG at the
+ * user-requested q80; anything above 1600w (i.e. cover-class srcset
+ * usage) creeps up to q86 to keep grain. Originals are untouched.
  */
 function qualityForWidth(w: number): number {
-  if (w <= 400) return 75;
-  if (w <= 800) return 80;
-  if (w <= 1600) return 82;
+  if (w <= 1600) return 80;
   return 86;
 }
 
@@ -352,7 +352,10 @@ export function imgproxySrcset(
       width: w,
       height: w,
       resize: "fit",
-      format: "auto",
+      // Web-tier variants land as JPEG (not AVIF/WEBP) — predictable
+      // delivery across all clients. The caller can override via `opts`
+      // when they need a format other than the default.
+      format: "jpg",
       quality: qualityForWidth(w),
       ...opts,
     });
