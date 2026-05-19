@@ -1,0 +1,164 @@
+services:
+  gallery-postgres:
+    image: postgres:16.5-alpine
+    container_name: gallery-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - gallery_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - gallery-internal
+
+  gallery-minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: gallery-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${PUBLIC_BASE_URL}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_SERVER_URL: ${MINIO_PUBLIC_ENDPOINT}
+    volumes:
+      - gallery_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "--local", "/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - gallery-internal
+
+  gallery-migrate:
+    image: ghcr.io/vatsonio/gallery-hub:latest
+    container_name: gallery-migrate
+    restart: "no"
+    command: ["npx", "tsx", "scripts/migrate.ts"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+    networks:
+      - gallery-internal
+
+  gallery-app:
+    image: ghcr.io/vatsonio/gallery-hub:latest
+    container_name: gallery-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: http://gallery-minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_REGION: us-east-1
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: gallery
+      MINIO_FORCE_PATH_STYLE: "true"
+      SESSION_PASSWORD: ${SESSION_PASSWORD}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      PUBLIC_IMGPROXY_URL: ${PUBLIC_IMGPROXY_URL}
+      IMGPROXY_URL: http://gallery-imgproxy:8080
+      IMGPROXY_KEY: ${IMGPROXY_KEY}
+      IMGPROXY_SALT: ${IMGPROXY_SALT}
+      APP_VERSION: prod
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+      gallery-minio:
+        condition: service_healthy
+      gallery-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    networks:
+      - gallery-internal
+
+  gallery-worker:
+    image: ghcr.io/vatsonio/gallery-hub-worker:latest
+    container_name: gallery-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: http://gallery-minio:9000
+      MINIO_REGION: us-east-1
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: gallery
+      MINIO_FORCE_PATH_STYLE: "true"
+      WORKER_BATCH_SIZE: "6"
+    depends_on:
+      gallery-postgres:
+        condition: service_healthy
+      gallery-minio:
+        condition: service_healthy
+      gallery-migrate:
+        condition: service_completed_successfully
+    networks:
+      - gallery-internal
+
+  gallery-imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:v3.27.2
+    container_name: gallery-imgproxy
+    restart: unless-stopped
+    environment:
+      IMGPROXY_KEY: ${IMGPROXY_KEY}
+      IMGPROXY_SALT: ${IMGPROXY_SALT}
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_S3_ENDPOINT: http://gallery-minio:9000
+      IMGPROXY_S3_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES: "true"
+      IMGPROXY_ENFORCE_WEBP: "true"
+      IMGPROXY_QUALITY: "82"
+      IMGPROXY_JPEG_PROGRESSIVE: "true"
+      IMGPROXY_PNG_INTERLACED: "true"
+      IMGPROXY_CONCURRENCY: "10"
+      IMGPROXY_TTL: "31536000"
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_MAX_SRC_RESOLUTION: "50"
+    depends_on:
+      gallery-minio:
+        condition: service_healthy
+    networks:
+      - gallery-internal
+
+  gallery-cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: gallery-cloudflared
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - gallery-app
+    networks:
+      - gallery-internal
+
+volumes:
+  gallery_pgdata:
+  gallery_miniodata:
+
+networks:
+  gallery-internal:
+    driver: bridge
