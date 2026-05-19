@@ -29,10 +29,11 @@ services:
       MINIO_API_CORS_ALLOW_ORIGIN: ${PUBLIC_BASE_URL}
       MINIO_BROWSER_REDIRECT_URL: ${MINIO_PUBLIC_ENDPOINT}
       MINIO_SERVER_URL: ${MINIO_PUBLIC_ENDPOINT}
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@localhost:9000
     volumes:
       - gallery_miniodata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "--local", "/data"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5

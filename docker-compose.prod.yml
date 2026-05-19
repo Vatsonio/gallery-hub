@@ -75,14 +75,18 @@ services:
       # no default, because a wrong value here causes MinIO to refuse to start.
       MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:?MINIO_BROWSER_REDIRECT_URL is required (e.g. https://minio.gallery.example.com)}
       MINIO_SERVER_URL: ${MINIO_PUBLIC_ENDPOINT}
+      # MC_HOST_<alias> seeds the bundled `mc` client with an auth-ready
+      # alias without us shelling in to run `mc alias set`. Lets the
+      # healthcheck below call `mc ready local` straight away.
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@localhost:9000
     volumes:
       - gallery_miniodata_prod:/data
     healthcheck:
-      # Recent minio/minio releases dropped `wget` and `curl` from the image,
-      # so external HTTP probes are out. `mc ready --local /data` consults the
-      # local server's readiness state through the bundled mc client — no
-      # network round-trip required and present on every image since 2023.
-      test: ["CMD", "mc", "ready", "--local", "/data"]
+      # Recent minio/minio releases dropped `wget` and `curl` from the
+      # ubi-micro base. `mc ready` is the official health probe and is
+      # bundled in every minio image — it talks over the local socket and
+      # needs no external tooling. Requires MC_HOST_local set above.
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
