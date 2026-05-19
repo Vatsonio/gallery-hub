@@ -410,11 +410,28 @@ export async function warmImgproxyVariants(
     urls.push(imgproxyWeb(it.s3Key, versionOpt));
   }
 
+  // imgproxy{Thumb,Web} generates browser-facing URLs that point at
+  // PUBLIC_IMGPROXY_URL (https://img.gallery.example.com). When the app
+  // itself warms those URLs, it hits Cloudflare Tunnel and loops back —
+  // which usually fails with "fetch failed" because cloudflared inside a
+  // container can't reach its own external hostname through the tunnel.
+  // Rewrite the host so warm fetches stay inside the Docker network and
+  // hit imgproxy directly over `http://gallery-imgproxy:8080`. The signed
+  // path is identical — imgproxy only verifies the path, not the host.
+  const publicBase = process.env.PUBLIC_IMGPROXY_URL ?? "";
+  const internalBase = process.env.IMGPROXY_URL ?? "";
+  function toInternalUrl(u: string): string {
+    if (publicBase && internalBase && publicBase !== internalBase && u.startsWith(publicBase)) {
+      return internalBase + u.slice(publicBase.length);
+    }
+    return u;
+  }
+
   let cursor = 0;
   async function worker(): Promise<void> {
     while (cursor < urls.length) {
       const idx = cursor++;
-      const url = urls[idx];
+      const url = toInternalUrl(urls[idx]);
       try {
         // 30 s per-fetch timeout. Cold-cache imgproxy on a fresh upload can
         // legitimately take 5–10 s per photo (libvips decode + AVIF encode
