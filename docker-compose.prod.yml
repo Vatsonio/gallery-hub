@@ -147,6 +147,8 @@ services:
     image: ${GALLERY_APP_IMAGE:-ghcr.io/vatsonio/gallery-hub:latest}
     container_name: gallery-app
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
@@ -201,6 +203,8 @@ services:
     image: ${GALLERY_WORKER_IMAGE:-ghcr.io/vatsonio/gallery-hub-worker:latest}
     container_name: gallery-worker
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
@@ -543,6 +547,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    security_opt: *default-security
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    networks:
+      - gallery-internal
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Watchtower — auto-pull + recreate for app/worker on every new GHCR push.
+  # Bypasses Portainer's "Re-pull image" bug (issue #13173). Limited to
+  # containers carrying the `com.centurylinklabs.watchtower.enable=true`
+  # label so it never touches postgres/minio/cloudflared/posthog (those
+  # stay on pinned tags and need explicit operator action to upgrade).
+  # ──────────────────────────────────────────────────────────────────────────
+  gallery-watchtower:
+    image: containrrr/watchtower:latest
+    container_name: gallery-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      TZ: UTC
     security_opt: *default-security
     logging: *default-logging
     deploy:

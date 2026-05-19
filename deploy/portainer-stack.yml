@@ -68,6 +68,8 @@ services:
     image: ghcr.io/vatsonio/gallery-hub:latest
     container_name: gallery-app
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
@@ -107,6 +109,8 @@ services:
     image: ghcr.io/vatsonio/gallery-hub-worker:latest
     container_name: gallery-worker
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
@@ -163,6 +167,29 @@ services:
       TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
     depends_on:
       - gallery-app
+    networks:
+      - gallery-internal
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Auto-update sidecar. Polls registry every WATCHTOWER_POLL_INTERVAL seconds
+  # for new digests on every container with the
+  # `com.centurylinklabs.watchtower.enable=true` label and recreates them with
+  # the new image. Bypasses Portainer's "Re-pull image" bug (issue #13173).
+  # Limited to labelled containers via --label-enable so it won't touch
+  # postgres/minio/cloudflared (those need manual pinned-tag updates).
+  # ──────────────────────────────────────────────────────────────────────────
+  gallery-watchtower:
+    image: containrrr/watchtower:latest
+    container_name: gallery-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_POLL_INTERVAL: 300
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      TZ: UTC
     networks:
       - gallery-internal
 
