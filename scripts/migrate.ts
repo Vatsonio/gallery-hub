@@ -51,6 +51,14 @@ export async function runMigrations(opts: RunMigrationsOptions): Promise<void> {
   }
 }
 
+async function provisionMinioBucket(): Promise<void> {
+  // Lazy-imported so test runners that exercise runMigrations() in isolation
+  // don't pay the S3 SDK initialisation cost.
+  const { ensureBucket } = await import("../src/lib/minio");
+  await ensureBucket();
+  console.log("[migrate] minio bucket ensured");
+}
+
 const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("migrate.ts");
 if (isMain) {
   const url = process.env.DATABASE_URL;
@@ -58,7 +66,21 @@ if (isMain) {
     console.error("[migrate] DATABASE_URL is not set");
     process.exit(1);
   }
-  runMigrations({ databaseUrl: url }).catch((err) => {
+  (async () => {
+    await runMigrations({ databaseUrl: url });
+    // Bucket provisioning lives here so the gallery-migrate one-shot leaves
+    // both DB and MinIO ready before gallery-app starts; the health probe
+    // can then return 200 immediately on first boot.
+    if (process.env.MINIO_ENDPOINT && process.env.MINIO_ACCESS_KEY) {
+      try {
+        await provisionMinioBucket();
+      } catch (err) {
+        console.error("[migrate] minio bucket provision failed:", err);
+        // Don't fail the migration — gallery-app's first upload still tries
+        // to create the bucket, and the operator can re-run manually.
+      }
+    }
+  })().catch((err) => {
     console.error("[migrate] failed:", err);
     process.exit(1);
   });

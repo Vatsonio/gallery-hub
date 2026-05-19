@@ -111,8 +111,19 @@ services:
     command: ["npx", "tsx", "scripts/migrate.ts"]
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      # MinIO env so the migrate one-shot can also provision the bucket —
+      # /api/health checks bucket existence and would flag the app
+      # unhealthy on first deploy otherwise.
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gallery-minio:9000}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
+      MINIO_FORCE_PATH_STYLE: "true"
     depends_on:
       gallery-postgres:
+        condition: service_healthy
+      gallery-minio:
         condition: service_healthy
     security_opt: *default-security
     logging: *default-logging

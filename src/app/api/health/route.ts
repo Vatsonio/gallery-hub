@@ -22,7 +22,15 @@ async function minioStatus(): Promise<"ok" | "fail"> {
   try {
     await s3Client.send(new HeadBucketCommand({ Bucket: BUCKET }));
     return "ok";
-  } catch {
+  } catch (err: unknown) {
+    // 404 = MinIO answered, just no bucket yet. The bucket is created on
+    // first upload via ensureBucket(); treating "missing" as a fail would
+    // stall the container as unhealthy on a fresh deploy before any user
+    // has logged in.
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (e?.name === "NotFound" || e?.$metadata?.httpStatusCode === 404) {
+      return "ok";
+    }
     return "fail";
   }
 }
