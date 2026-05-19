@@ -61,7 +61,7 @@ services:
   # MinIO object store
   # ──────────────────────────────────────────────────────────────────────────
   gallery-minio:
-    image: minio/minio:RELEASE.2024-10-29T16-01-48Z
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: gallery-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -69,19 +69,24 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
       # Browser CORS — MinIO must allow the gallery's public origin for direct
-      # presigned PUT/GET. Set to https://gallery.divass.space (no trailing slash).
+      # presigned PUT/GET. Set to your PUBLIC_BASE_URL (no trailing slash).
       MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN}
-      # Browser redirects sent by MinIO must use the public hostname.
-      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-https://minio.gallery.divass.space}
+      # Browser redirects sent by MinIO must use the public hostname. Required —
+      # no default, because a wrong value here causes MinIO to refuse to start.
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:?MINIO_BROWSER_REDIRECT_URL is required (e.g. https://minio.gallery.example.com)}
       MINIO_SERVER_URL: ${MINIO_PUBLIC_ENDPOINT}
     volumes:
       - gallery_miniodata_prod:/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:9000/minio/health/ready || exit 1"]
+      # Recent minio/minio releases dropped `wget` and `curl` from the image,
+      # so external HTTP probes are out. `mc ready --local /data` consults the
+      # local server's readiness state through the bundled mc client — no
+      # network round-trip required and present on every image since 2023.
+      test: ["CMD", "mc", "ready", "--local", "/data"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     security_opt: *default-security
     logging: *default-logging
     deploy:
@@ -224,7 +229,7 @@ services:
   # HMAC-SHA256 (IMGPROXY_KEY + IMGPROXY_SALT) so arbitrary-source-fetch is
   # blocked, caches output for IMGPROXY_TTL (1y).
   #
-  # Cloudflare Tunnel exposes this on https://img.gallery.divass.space — the
+  # Cloudflare Tunnel exposes this on https://img.gallery.example.com — the
   # browser hits it directly, the app + worker stay internal. See
   # docs/deploy.md for the tunnel hostname wiring.
   # ──────────────────────────────────────────────────────────────────────────
@@ -372,7 +377,7 @@ services:
       CLICKHOUSE_HOST: posthog-clickhouse
       CLICKHOUSE_DATABASE: posthog
       CLICKHOUSE_VERIFY: "false"
-      SITE_URL: ${POSTHOG_SITE_URL:-https://posthog.gallery.divass.space}
+      SITE_URL: ${POSTHOG_SITE_URL:-https://posthog.gallery.example.com}
       SECRET_KEY: ${POSTHOG_SECRET_KEY:?POSTHOG_SECRET_KEY is required}
       IS_BEHIND_PROXY: ${POSTHOG_IS_BEHIND_PROXY:-true}
       DISABLE_SECURE_SSL_REDIRECT: ${POSTHOG_DISABLE_SECURE_SSL_REDIRECT:-true}
