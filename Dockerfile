@@ -30,9 +30,15 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Migration assets — run via the gallery-migrate one-shot service
+# Migration assets — run via the gallery-migrate one-shot service.
+# `src/` is required because scripts/migrate.ts dynamically imports
+# `../src/lib/minio` (bucket provision) and scripts/seed-admin.ts
+# imports `../src/lib/passwords` (argon2 hash). Without these copies
+# the one-shot exits 0 but logs ERR_MODULE_NOT_FOUND and the prod
+# stack ends up with no bucket and no admin row.
 COPY --from=builder --chown=nextjs:nodejs /app/migrations ./migrations
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
 COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
 COPY --from=deps    --chown=nextjs:nodejs /app/node_modules ./node_modules
 

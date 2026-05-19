@@ -116,8 +116,8 @@ services:
       # unhealthy on first deploy otherwise.
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gallery-minio:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
       MINIO_FORCE_PATH_STYLE: "true"
       # ADMIN_* lets the migrate one-shot also seed the bootstrap admin /
@@ -153,8 +153,8 @@ services:
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gallery-minio:9000}
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?MINIO_PUBLIC_ENDPOINT is required}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
       MINIO_FORCE_PATH_STYLE: "true"
       SESSION_PASSWORD: ${SESSION_PASSWORD:?SESSION_PASSWORD is required}
@@ -206,8 +206,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gallery-minio:9000}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
       MINIO_FORCE_PATH_STYLE: "true"
       # How many derivative jobs this worker process runs concurrently. 6
@@ -263,8 +263,8 @@ services:
       IMGPROXY_USE_S3: "true"
       IMGPROXY_S3_ENDPOINT: ${IMGPROXY_S3_ENDPOINT:-http://gallery-minio:9000}
       IMGPROXY_S3_REGION: ${MINIO_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       # MinIO is on a service-name hostname inside Docker — counts as a
       # loopback target from imgproxy's SSRF heuristic. Whitelist it here.
       IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES: "true"
@@ -484,8 +484,8 @@ services:
       # Source — always the in-cluster MinIO. Uses the same access keys the
       # app uses (read access is sufficient).
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://gallery-minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
       # Cold-storage destination selector.
       BACKUP_TARGET: ${BACKUP_TARGET:-local}

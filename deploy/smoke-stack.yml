@@ -1,49 +1,55 @@
+# Local smoke-test stack. Mirrors prod (portainer-stack.yml) but with
+# locally-built images and no Cloudflare Tunnel. Ports are bound to
+# localhost so curl + browser tests can hit the app directly.
 services:
   gallery-postgres:
     image: postgres:16.5-alpine
-    container_name: gallery-postgres
+    container_name: smoke-gallery-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - gallery_pgdata:/var/lib/postgresql/data
+      - smoke_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 15s
     networks:
-      - gallery-internal
+      - smoke
 
   gallery-minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: gallery-minio
+    container_name: smoke-gallery-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_API_CORS_ALLOW_ORIGIN: ${PUBLIC_BASE_URL}
-      MINIO_BROWSER_REDIRECT_URL: ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
       MINIO_SERVER_URL: ${MINIO_PUBLIC_ENDPOINT}
       MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@localhost:9000
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     volumes:
-      - gallery_miniodata:/data
+      - smoke_miniodata:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 15s
     networks:
-      - gallery-internal
+      - smoke
 
   gallery-migrate:
-    image: ghcr.io/vatsonio/gallery-hub:latest
-    container_name: gallery-migrate
+    image: gallery-hub:test
+    container_name: smoke-gallery-migrate
     restart: "no"
     command: ["npx", "tsx", "scripts/migrate.ts"]
     environment:
@@ -62,11 +68,11 @@ services:
       gallery-minio:
         condition: service_healthy
     networks:
-      - gallery-internal
+      - smoke
 
   gallery-app:
-    image: ghcr.io/vatsonio/gallery-hub:latest
-    container_name: gallery-app
+    image: gallery-hub:test
+    container_name: smoke-gallery-app
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -86,7 +92,9 @@ services:
       IMGPROXY_URL: http://gallery-imgproxy:8080
       IMGPROXY_KEY: ${IMGPROXY_KEY}
       IMGPROXY_SALT: ${IMGPROXY_SALT}
-      APP_VERSION: prod
+      APP_VERSION: smoke
+    ports:
+      - "3000:3000"
     depends_on:
       gallery-postgres:
         condition: service_healthy
@@ -96,17 +104,17 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health || exit 1"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
-      retries: 3
-      start_period: 45s
+      retries: 5
+      start_period: 30s
     networks:
-      - gallery-internal
+      - smoke
 
   gallery-worker:
-    image: ghcr.io/vatsonio/gallery-hub-worker:latest
-    container_name: gallery-worker
-    restart: unless-stopped
+    image: gallery-hub-worker:test
+    container_name: smoke-gallery-worker
+    restart: "on-failure:3"
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
@@ -116,7 +124,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       MINIO_BUCKET: gallery
       MINIO_FORCE_PATH_STYLE: "true"
-      WORKER_BATCH_SIZE: "6"
+      WORKER_BATCH_SIZE: "2"
     depends_on:
       gallery-postgres:
         condition: service_healthy
@@ -125,11 +133,11 @@ services:
       gallery-migrate:
         condition: service_completed_successfully
     networks:
-      - gallery-internal
+      - smoke
 
   gallery-imgproxy:
     image: ghcr.io/imgproxy/imgproxy:v3.27.2
-    container_name: gallery-imgproxy
+    container_name: smoke-gallery-imgproxy
     restart: unless-stopped
     environment:
       IMGPROXY_KEY: ${IMGPROXY_KEY}
@@ -142,34 +150,18 @@ services:
       IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES: "true"
       IMGPROXY_ENFORCE_WEBP: "true"
       IMGPROXY_QUALITY: "82"
-      IMGPROXY_JPEG_PROGRESSIVE: "true"
-      IMGPROXY_PNG_INTERLACED: "true"
-      IMGPROXY_CONCURRENCY: "10"
-      IMGPROXY_TTL: "31536000"
-      IMGPROXY_USE_ETAG: "true"
-      IMGPROXY_MAX_SRC_RESOLUTION: "50"
+    ports:
+      - "8080:8080"
     depends_on:
       gallery-minio:
         condition: service_healthy
     networks:
-      - gallery-internal
-
-  gallery-cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: gallery-cloudflared
-    restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
-    depends_on:
-      - gallery-app
-    networks:
-      - gallery-internal
+      - smoke
 
 volumes:
-  gallery_pgdata:
-  gallery_miniodata:
+  smoke_pgdata:
+  smoke_miniodata:
 
 networks:
-  gallery-internal:
+  smoke:
     driver: bridge
