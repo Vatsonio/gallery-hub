@@ -97,7 +97,11 @@ services:
       gallery-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health || exit 1"]
+      # Explicit 127.0.0.1 — BusyBox wget on Alpine tries ::1 first when
+      # asked for `localhost` and Next listens on 0.0.0.0 (v4 only), so
+      # the probe got Connection refused and marked the container
+      # unhealthy even though /api/health was serving 200 over v4.
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
