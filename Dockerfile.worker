@@ -9,7 +9,12 @@ FROM deps AS build
 COPY tsconfig.json tsconfig.worker.json next.config.mjs ./
 COPY src ./src
 COPY workers ./workers
-RUN npx tsc --project tsconfig.worker.json
+# tsc preserves the `@/*` path alias as-is in the emitted JS — Node has no
+# notion of tsconfig paths at runtime and crashes on require('@/lib/...').
+# tsc-alias rewrites those imports to relative paths post-compile so the
+# bundle runs straight through Node without a tsconfig-paths/register hook.
+RUN npx tsc --project tsconfig.worker.json \
+ && npx tsc-alias -p tsconfig.worker.json
 
 FROM base AS runtime
 ENV NODE_ENV=production

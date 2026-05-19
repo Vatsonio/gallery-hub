@@ -80,6 +80,22 @@ if (isMain) {
         // to create the bucket, and the operator can re-run manually.
       }
     }
+    // Seed the bootstrap admin from env. First run promotes the row to
+    // 'owner' (migrations/018 backfill is a no-op on a fresh DB, so without
+    // this step nobody has owner role and /admin/users etc. are unreachable).
+    // Re-runs only update the password — role stays whatever it was.
+    if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+      try {
+        const { seedAdmin } = await import("./seed-admin");
+        await seedAdmin({
+          databaseUrl: url,
+          email: process.env.ADMIN_EMAIL,
+          password: process.env.ADMIN_PASSWORD,
+        });
+      } catch (err) {
+        console.error("[migrate] seed admin failed:", err);
+      }
+    }
   })().catch((err) => {
     console.error("[migrate] failed:", err);
     process.exit(1);

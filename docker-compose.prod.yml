@@ -120,6 +120,11 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET:-gallery}
       MINIO_FORCE_PATH_STYLE: "true"
+      # ADMIN_* lets the migrate one-shot also seed the bootstrap admin /
+      # owner row — first run promotes them to 'owner', re-runs are
+      # password-only updates.
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       gallery-postgres:
         condition: service_healthy
