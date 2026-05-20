@@ -82,6 +82,11 @@ export async function POST(req: Request): Promise<Response> {
       height: p.height,
       orig_bytes: p.size,
       taken_at: null,
+      // F12: stamp the uploader so per-user quotas at presign can sum
+      // only this user's bytes. Test-bypass sessions (auth.userId =
+      // "test-admin") never resolve to a real admin_users row so the FK
+      // would explode — null it out instead.
+      created_by_user_id: auth.userId === "test-admin" ? null : auth.userId,
     })),
   );
 

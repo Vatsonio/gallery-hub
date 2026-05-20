@@ -491,6 +491,37 @@ export default async function SettingsPage({
               album&apos;s photos exceed this. Set 0 to disable.
             </p>
           </label>
+          <label className="block">
+            <span className={labelCls}>Default per-user TOTAL quota (GB)</span>
+            <input
+              type="number"
+              name="default_user_quota_total_gb"
+              defaultValue={settings.uploads.default_user_quota_total_gb}
+              min={0}
+              max={1_000_000}
+              step={1}
+              className={`mt-1 ${inputCls}`}
+            />
+            <p className="mt-1 text-xs text-text-muted">
+              Each admin user&apos;s total upload cap across all albums.
+              Per-user override on Users page wins. 0 = unlimited.
+            </p>
+          </label>
+          <label className="block">
+            <span className={labelCls}>Default per-user album quota (GB)</span>
+            <input
+              type="number"
+              name="default_user_quota_album_gb"
+              defaultValue={settings.uploads.default_user_quota_album_gb}
+              min={0}
+              max={1_000_000}
+              step={1}
+              className={`mt-1 ${inputCls}`}
+            />
+            <p className="mt-1 text-xs text-text-muted">
+              Per-user, per-album cap. Per-user override wins. 0 = unlimited.
+            </p>
+          </label>
           <div className="md:col-span-2 flex justify-end">
             <button type="submit" className={saveBtn}>
               Save upload limits

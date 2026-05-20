@@ -11,6 +11,12 @@ export interface AdminUser {
   created_at: string;
   last_login_at: string | null;
   disabled_at: string | null;
+  /** Per-user override of settings.uploads.default_user_quota_total_gb (in
+   * bytes). NULL = fall back to the global default. */
+  quota_total_bytes: string | null;
+  /** Per-user override of settings.uploads.default_user_quota_album_gb (in
+   * bytes). NULL = fall back to the global default. */
+  quota_album_bytes: string | null;
 }
 
 interface AdminUserRow extends AdminUser {
@@ -19,7 +25,9 @@ interface AdminUserRow extends AdminUser {
 
 const SELECT_PUBLIC = `id, email, role, name, created_at::text AS created_at,
        last_login_at::text AS last_login_at,
-       disabled_at::text AS disabled_at`;
+       disabled_at::text AS disabled_at,
+       quota_total_bytes::text AS quota_total_bytes,
+       quota_album_bytes::text AS quota_album_bytes`;
 
 /**
  * Verify an email+password pair against admin_users. Constant-time for the
@@ -58,6 +66,8 @@ function stripHash(row: AdminUserRow): AdminUser {
     created_at: row.created_at,
     last_login_at: row.last_login_at,
     disabled_at: row.disabled_at,
+    quota_total_bytes: row.quota_total_bytes,
+    quota_album_bytes: row.quota_album_bytes,
   };
 }
 
@@ -100,6 +110,12 @@ export interface UpdateUserInput {
   name?: string | null;
   role?: UserRole;
   disabled?: boolean;
+  /** Set to a positive bigint (as a string) to enforce a per-user TOTAL
+   * upload cap; set to null to clear the override and revert to the global
+   * default; leave undefined to keep the current value. */
+  quota_total_bytes?: string | null;
+  /** Same semantics as quota_total_bytes, but per-album. */
+  quota_album_bytes?: string | null;
 }
 
 export async function updateUser(id: string, input: UpdateUserInput): Promise<AdminUser | null> {
@@ -131,6 +147,14 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Ad
              WHEN ${input.disabled === undefined} THEN disabled_at
              WHEN ${input.disabled === true} THEN COALESCE(disabled_at, ${disabledAt})
              ELSE NULL
+           END,
+           quota_total_bytes = CASE
+             WHEN ${input.quota_total_bytes === undefined} THEN quota_total_bytes
+             ELSE ${input.quota_total_bytes ?? null}::bigint
+           END,
+           quota_album_bytes = CASE
+             WHEN ${input.quota_album_bytes === undefined} THEN quota_album_bytes
+             ELSE ${input.quota_album_bytes ?? null}::bigint
            END
      WHERE id = ${id}
      RETURNING ${sql.unsafe(SELECT_PUBLIC)}

@@ -240,9 +240,31 @@ export async function saveUploadLimits(form: FormData): Promise<void> {
   const max_album_gb = rawAlbumGb === "" || rawAlbumGb === "0"
     ? 0
     : parsePositiveInt(rawAlbumGb, "Max album GB", section, { min: 1, max: 1_000_000 });
+  const rawUserTotalGb = String(form.get("default_user_quota_total_gb") ?? "0").trim();
+  const default_user_quota_total_gb =
+    rawUserTotalGb === "" || rawUserTotalGb === "0"
+      ? 0
+      : parsePositiveInt(rawUserTotalGb, "Default user total quota GB", section, {
+          min: 1,
+          max: 1_000_000,
+        });
+  const rawUserAlbumGb = String(form.get("default_user_quota_album_gb") ?? "0").trim();
+  const default_user_quota_album_gb =
+    rawUserAlbumGb === "" || rawUserAlbumGb === "0"
+      ? 0
+      : parsePositiveInt(rawUserAlbumGb, "Default user album quota GB", section, {
+          min: 1,
+          max: 1_000_000,
+        });
   await saveSettings(
     {
-      uploads: { max_file_size_mb, max_files_per_album, max_album_gb },
+      uploads: {
+        max_file_size_mb,
+        max_files_per_album,
+        max_album_gb,
+        default_user_quota_total_gb,
+        default_user_quota_album_gb,
+      },
     },
     owner.userId,
   );

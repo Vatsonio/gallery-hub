@@ -54,6 +54,12 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  // Pre-compute incoming bytes — reused by every quota check below.
+  const incomingBytes = body.files.reduce(
+    (acc, f) => acc + (typeof f.size === "number" && f.size > 0 ? f.size : 0),
+    0,
+  );
+
   // Per-album cap (0 = disabled). Sums all photos already in this album
   // (ready + processing) and rejects the batch if the new files would
   // push it over. Computed inline because storage-usage's getStorageUsage()
@@ -67,10 +73,6 @@ export async function POST(req: Request): Promise<Response> {
         AND status IN ('ready', 'processing')
     `;
     const usedBytes = Number(rows[0]?.used_bytes ?? "0");
-    const incomingBytes = body.files.reduce(
-      (acc, f) => acc + (typeof f.size === "number" && f.size > 0 ? f.size : 0),
-      0,
-    );
     const capBytes = albumCapGb * 1_000_000_000;
     if (usedBytes + incomingBytes > capBytes) {
       return NextResponse.json(
@@ -82,6 +84,79 @@ export async function POST(req: Request): Promise<Response> {
         },
         { status: 507 },
       );
+    }
+  }
+
+  // Per-user quotas. Two flavours stack on top of the per-album cap:
+  //
+  //   - TOTAL  — bytes this user has uploaded across every album.
+  //   - ALBUM  — bytes this user has uploaded into THIS specific album.
+  //
+  // Each flavour has a per-user override (admin_users.quota_*_bytes) and a
+  // global default (settings.uploads.default_user_quota_*_gb). NULL override
+  // → use default. default of 0 → unlimited (and so is a NULL override
+  // combined with default-0).
+  //
+  // Test-bypass sessions never persist a created_by_user_id, so their
+  // historical bytes always sum to zero and they implicitly pass.
+  if (auth.userId && auth.userId !== "test-admin") {
+    const userRows = await sql<{
+      quota_total_bytes: string | null;
+      quota_album_bytes: string | null;
+    }[]>`
+      SELECT quota_total_bytes::text AS quota_total_bytes,
+             quota_album_bytes::text AS quota_album_bytes
+        FROM admin_users WHERE id = ${auth.userId}
+    `;
+    const u = userRows[0];
+    const overrideTotal = u?.quota_total_bytes ? Number(u.quota_total_bytes) : null;
+    const overrideAlbum = u?.quota_album_bytes ? Number(u.quota_album_bytes) : null;
+    const defaultTotalBytes = settings.uploads.default_user_quota_total_gb * 1_000_000_000;
+    const defaultAlbumBytes = settings.uploads.default_user_quota_album_gb * 1_000_000_000;
+    const effectiveTotalCap = overrideTotal ?? defaultTotalBytes;
+    const effectiveAlbumCap = overrideAlbum ?? defaultAlbumBytes;
+
+    if (effectiveTotalCap > 0) {
+      const sumRows = await sql<{ used: string | null }[]>`
+        SELECT COALESCE(SUM(orig_bytes), 0)::text AS used
+          FROM photos
+         WHERE created_by_user_id = ${auth.userId}
+           AND status IN ('ready', 'processing')
+      `;
+      const usedBytes = Number(sumRows[0]?.used ?? "0");
+      if (usedBytes + incomingBytes > effectiveTotalCap) {
+        return NextResponse.json(
+          {
+            reason: "user_total_quota_exceeded",
+            used_bytes: usedBytes,
+            incoming_bytes: incomingBytes,
+            cap_bytes: effectiveTotalCap,
+          },
+          { status: 507 },
+        );
+      }
+    }
+
+    if (effectiveAlbumCap > 0) {
+      const sumRows = await sql<{ used: string | null }[]>`
+        SELECT COALESCE(SUM(orig_bytes), 0)::text AS used
+          FROM photos
+         WHERE created_by_user_id = ${auth.userId}
+           AND album_id = ${album.id}
+           AND status IN ('ready', 'processing')
+      `;
+      const usedBytes = Number(sumRows[0]?.used ?? "0");
+      if (usedBytes + incomingBytes > effectiveAlbumCap) {
+        return NextResponse.json(
+          {
+            reason: "user_album_quota_exceeded",
+            used_bytes: usedBytes,
+            incoming_bytes: incomingBytes,
+            cap_bytes: effectiveAlbumCap,
+          },
+          { status: 507 },
+        );
+      }
     }
   }
 

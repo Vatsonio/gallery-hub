@@ -93,6 +93,42 @@ export async function updateUserAction(formData: FormData): Promise<void> {
   redirect(`${successBack}?ok=${encodeMessage(okMsg)}`);
 }
 
+/**
+ * Per-user quota override. GB input → bytes BIGINT on the row. An empty
+ * input clears the override and reverts to the global default from
+ * settings.uploads. A 0 input is treated the same as empty — "unlimited
+ * for this user" only makes sense at the global-default level; clearing
+ * the per-user override and trusting the default keeps the data model
+ * smaller.
+ */
+function parseQuotaGbToBytes(raw: FormDataEntryValue | null): string | null {
+  if (raw === null) return null;
+  const s = String(raw).trim();
+  if (s.length === 0) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
+  if (n === 0) return null;
+  return String(n * 1_000_000_000);
+}
+
+export async function updateUserQuotaAction(formData: FormData): Promise<void> {
+  await requireOwner();
+  const id = String(formData.get("id") ?? "");
+  if (!id) redirect("/admin/users");
+
+  const quota_total_bytes = parseQuotaGbToBytes(formData.get("quota_total_gb"));
+  const quota_album_bytes = parseQuotaGbToBytes(formData.get("quota_album_gb"));
+
+  try {
+    await updateUser(id, { quota_total_bytes, quota_album_bytes });
+  } catch (err) {
+    redirect(`/admin/users/${id}?error=${encodeMessage(safeErrorMessage(err, "updateUserQuota"))}`);
+  }
+
+  revalidatePath(`/admin/users/${id}`);
+  redirect(`/admin/users/${id}?ok=${encodeMessage("Quota updated")}`);
+}
+
 export async function resetPasswordAction(formData: FormData): Promise<void> {
   await requireOwner();
   const id = String(formData.get("id") ?? "");

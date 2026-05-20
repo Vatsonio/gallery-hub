@@ -1,18 +1,28 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ChevronLeft, UserCog, Power, Trash2, KeyRound } from "lucide-react";
+import { ChevronLeft, UserCog, Power, Trash2, KeyRound, Gauge } from "lucide-react";
 import { requireOwner } from "@/lib/auth-check";
 import { getAdminSession } from "@/lib/session";
 import { getUserById } from "@/lib/users";
+import { loadSettings } from "@/lib/settings";
 import {
   updateUserAction,
+  updateUserQuotaAction,
   resetPasswordAction,
   deleteUserAction,
 } from "../_actions";
 import { FlashToasts } from "../_flash";
 import { PasswordField } from "../_PasswordField";
 import { formatAbsolute, formatRelative } from "../_format";
+
+function bytesToGbInputValue(bytes: string | null): string {
+  if (bytes === null) return "";
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  // Inputs are GB integers; we store bytes so 1 GB → 1_000_000_000 bytes.
+  return String(Math.round(n / 1_000_000_000));
+}
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +33,7 @@ interface Props {
 export default async function EditUserPage({ params }: Props): Promise<React.JSX.Element> {
   await requireOwner();
   const { id } = await params;
-  const user = await getUserById(id);
+  const [user, settings] = await Promise.all([getUserById(id), loadSettings()]);
   if (!user) notFound();
 
   const session = await getAdminSession();
@@ -32,6 +42,11 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
   const disabled = user.disabled_at !== null;
   const roleEditable = !isOwner;
   const statusEditable = !isOwner;
+
+  const defaultTotalGb = settings.uploads.default_user_quota_total_gb;
+  const defaultAlbumGb = settings.uploads.default_user_quota_album_gb;
+  const totalQuotaInput = bytesToGbInputValue(user.quota_total_bytes);
+  const albumQuotaInput = bytesToGbInputValue(user.quota_album_bytes);
 
   return (
     <div className="p-6 max-w-screen-md">
@@ -113,6 +128,67 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
               className="rounded-lg bg-rose-accent hover:bg-rose-hover transition px-4 py-2 text-sm font-medium text-white cursor-pointer"
             >
               Save changes
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="mt-6 rounded-xl border border-line bg-bg-elevated p-6">
+        <h2 className="text-sm uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+          <Gauge className="size-3.5" />
+          Upload quota
+        </h2>
+        <p className="mb-4 text-xs text-text-muted">
+          Per-user caps that override the global defaults in{" "}
+          <Link href="/admin/settings?section=uploads" className="text-rose-300 hover:text-rose-200">
+            Settings → Upload limits
+          </Link>
+          . Leave blank to fall back to the default. 0 (default) = unlimited.
+        </p>
+        <form action={updateUserQuotaAction} className="grid gap-4 md:grid-cols-2">
+          <input type="hidden" name="id" value={user.id} />
+          <label className="block">
+            <span className="text-xs text-text-muted uppercase tracking-wider">
+              Total quota (GB)
+            </span>
+            <input
+              name="quota_total_gb"
+              type="number"
+              min={0}
+              max={1_000_000}
+              step={1}
+              defaultValue={totalQuotaInput}
+              placeholder={`default ${defaultTotalGb || "∞"}`}
+              className="mt-1 w-full rounded-lg bg-bg-card border border-line px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-rose-accent"
+            />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Across all albums this user uploads into.
+            </p>
+          </label>
+          <label className="block">
+            <span className="text-xs text-text-muted uppercase tracking-wider">
+              Per-album quota (GB)
+            </span>
+            <input
+              name="quota_album_gb"
+              type="number"
+              min={0}
+              max={1_000_000}
+              step={1}
+              defaultValue={albumQuotaInput}
+              placeholder={`default ${defaultAlbumGb || "∞"}`}
+              className="mt-1 w-full rounded-lg bg-bg-card border border-line px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-rose-accent"
+            />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Per single album this user uploads into.
+            </p>
+          </label>
+          <div className="md:col-span-2 flex justify-end">
+            <button
+              type="submit"
+              className="rounded-lg bg-rose-accent hover:bg-rose-hover transition px-4 py-2 text-sm font-medium text-white cursor-pointer"
+            >
+              Save quota
             </button>
           </div>
         </form>

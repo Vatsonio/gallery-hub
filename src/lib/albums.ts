@@ -204,16 +204,19 @@ export interface InsertPhotoInput {
   height: number;
   orig_bytes: number;
   taken_at: Date | null;
+  /** Admin user who triggered the upload — drives the per-user quota
+   * enforcement at presign time. Null for legacy callers / tests. */
+  created_by_user_id?: string | null;
 }
 
 export async function insertPhoto(input: InsertPhotoInput): Promise<PhotoRow> {
   const rows = await sql<PhotoRow[]>`
-    INSERT INTO photos (id, album_id, filename, width, height, orig_bytes, sort_order, taken_at, status)
+    INSERT INTO photos (id, album_id, filename, width, height, orig_bytes, sort_order, taken_at, status, created_by_user_id)
     VALUES (
       ${input.id}, ${input.album_id}, ${input.filename},
       ${input.width}, ${input.height}, ${input.orig_bytes},
       COALESCE((SELECT MAX(sort_order) + 1 FROM photos WHERE album_id = ${input.album_id}), 0),
-      ${input.taken_at}, 'processing'
+      ${input.taken_at}, 'processing', ${input.created_by_user_id ?? null}
     ) RETURNING *`;
   return rows[0];
 }
@@ -253,6 +256,7 @@ export async function insertPhotosBatch(inputs: InsertPhotoInput[]): Promise<Pho
     sort_order: base + i,
     taken_at: p.taken_at,
     status: "processing",
+    created_by_user_id: p.created_by_user_id ?? null,
   }));
   // postgres.js sql(rows, ...cols) expands to a multi-row VALUES literal,
   // then RETURNING * gives us the inserted PhotoRows in insertion order.
@@ -270,6 +274,7 @@ export async function insertPhotosBatch(inputs: InsertPhotoInput[]): Promise<Pho
       "sort_order",
       "taken_at",
       "status",
+      "created_by_user_id",
     ) as never}
     RETURNING *`;
 }

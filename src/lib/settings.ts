@@ -54,6 +54,18 @@ export interface UploadLimits {
    * presigns return 507 Insufficient Storage.
    */
   max_album_gb: number;
+  /**
+   * Default per-user TOTAL quota in GB (sum across every album the user
+   * uploaded into). 0 = unlimited. Per-user override lives on
+   * admin_users.quota_total_bytes; this default kicks in only when that
+   * column is NULL.
+   */
+  default_user_quota_total_gb: number;
+  /**
+   * Default per-user PER-ALBUM quota in GB. Same fallback semantics as
+   * default_user_quota_total_gb.
+   */
+  default_user_quota_album_gb: number;
 }
 
 export interface AppSettings {
@@ -94,6 +106,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     max_file_size_mb: 50,
     max_files_per_album: 500,
     max_album_gb: 0,
+    default_user_quota_total_gb: 0,
+    default_user_quota_album_gb: 0,
   },
 };
 
