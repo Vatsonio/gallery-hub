@@ -49,6 +49,18 @@ export interface RecentExport {
   created_at: string;
 }
 
+export interface AlbumStorageBreakdown {
+  id: string;
+  slug: string;
+  title: string;
+  bytes: number;
+  photos: number;
+  /** Most-prolific uploader's email — best proxy for "whose album" when
+   * multiple admins contributed. Null when no photo in this album has
+   * created_by_user_id (legacy data pre-020). */
+  top_uploader: string | null;
+}
+
 export interface AdminUserRow {
   id: string;
   email: string;
@@ -241,6 +253,55 @@ interface ExportRow {
   album_title: string;
   details: { scope?: string; variant?: string; bytes?: number } | null;
   created_at: Date;
+}
+
+interface AlbumStorageRow {
+  id: string;
+  slug: string;
+  title: string;
+  bytes: bigint | string | null;
+  photos: bigint | string | null;
+  top_uploader: string | null;
+}
+
+/**
+ * Per-album storage usage + best-guess "whose album" attribution. The
+ * uploader column lives on `photos.created_by_user_id` (added in
+ * migration 020) so albums that predate the migration return
+ * `top_uploader = null`. We surface the uploader's email — fits the
+ * existing /admin/metrics density.
+ */
+export async function getAlbumStorageBreakdown(limit = 20): Promise<AlbumStorageBreakdown[]> {
+  const rows = await sql<AlbumStorageRow[]>`
+    SELECT
+      a.id, a.slug, a.title,
+      COALESCE(SUM(p.orig_bytes), 0)::bigint AS bytes,
+      COUNT(p.id)::bigint                    AS photos,
+      (
+        SELECT u.email
+          FROM photos p2
+          LEFT JOIN admin_users u ON u.id = p2.created_by_user_id
+         WHERE p2.album_id = a.id
+           AND p2.created_by_user_id IS NOT NULL
+         GROUP BY u.email
+         ORDER BY COUNT(*) DESC
+         LIMIT 1
+      ) AS top_uploader
+    FROM albums a
+    LEFT JOIN photos p ON p.album_id = a.id AND p.status IN ('ready', 'processing')
+    WHERE a.deleted_at IS NULL
+    GROUP BY a.id, a.slug, a.title
+    ORDER BY bytes DESC, photos DESC, a.created_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map((r) => ({
+    id: r.id,
+    slug: r.slug,
+    title: r.title,
+    bytes: num(r.bytes),
+    photos: num(r.photos),
+    top_uploader: r.top_uploader,
+  }));
 }
 
 export async function getRecentExports(limit = 20): Promise<RecentExport[]> {

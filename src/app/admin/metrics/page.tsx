@@ -17,6 +17,7 @@ import {
   getTopAlbums,
   getRecentExports,
   getSystemHealth,
+  getAlbumStorageBreakdown,
 } from "@/lib/metrics";
 import { getDiskInfo, type DiskRow } from "@/lib/disk-info";
 import { formatBytes, formatCount, formatRelativeTime } from "@/lib/format";
@@ -45,15 +46,17 @@ function formatAbsolute(iso: string | null): string {
 export default async function MetricsPage(): Promise<React.JSX.Element> {
   await requireOwner();
 
-  const [storage, views, favorites, topAlbums, recentExports, health, disks] = await Promise.all([
-    getStorageMetrics(),
-    getViewsMetrics(),
-    getFavoritesMetrics(),
-    getTopAlbums(10),
-    getRecentExports(20),
-    getSystemHealth(),
-    getDiskInfo(),
-  ]);
+  const [storage, views, favorites, topAlbums, recentExports, health, disks, albumStorage] =
+    await Promise.all([
+      getStorageMetrics(),
+      getViewsMetrics(),
+      getFavoritesMetrics(),
+      getTopAlbums(10),
+      getRecentExports(20),
+      getSystemHealth(),
+      getDiskInfo(),
+      getAlbumStorageBreakdown(20),
+    ]);
 
   const delta = pctDelta(views.views7d, views.views7dPrior);
 
@@ -196,6 +199,88 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Section C2 — Album storage breakdown */}
+      <section className="mt-8">
+        <header className="flex items-baseline justify-between mb-3">
+          <h2 className="text-sm uppercase tracking-widest text-text-muted">
+            Album storage
+          </h2>
+          <p className="text-xs text-text-muted">
+            who&apos;s using how much of the bucket
+          </p>
+        </header>
+        <div className="overflow-hidden rounded-xl border border-line bg-bg-elevated">
+          <table className="w-full text-sm">
+            <thead className="bg-bg-card text-text-muted">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">Album</th>
+                <th className="px-4 py-3 text-left font-medium">Uploader</th>
+                <th className="px-4 py-3 text-right font-medium">Photos</th>
+                <th className="px-4 py-3 text-right font-medium">Storage</th>
+                <th className="px-4 py-3 text-left font-medium">Share</th>
+              </tr>
+            </thead>
+            <tbody className="text-text">
+              {albumStorage.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center text-text-muted">
+                    No albums yet.
+                  </td>
+                </tr>
+              ) : (
+                (() => {
+                  const totalBytes = albumStorage.reduce((s, a) => s + a.bytes, 0);
+                  return albumStorage.map((a) => {
+                    const pct = totalBytes > 0 ? (a.bytes / totalBytes) * 100 : 0;
+                    return (
+                      <tr key={a.id} className="border-t border-line">
+                        <td className="px-4 py-3 max-w-[14rem] truncate">
+                          <Link
+                            href={`/admin/albums/${a.slug}`}
+                            className="text-text hover:text-rose-300 transition"
+                          >
+                            {a.title}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 text-text-muted truncate max-w-[14rem]">
+                          {a.top_uploader ?? (
+                            <span className="text-text-muted/60 italic">unknown</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {formatCount(a.photos)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {formatBytes(a.bytes)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1 w-24 rounded-full bg-bg-card overflow-hidden">
+                              <div
+                                className="h-full bg-rose-accent/70"
+                                style={{ width: `${Math.min(100, pct).toFixed(1)}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] tabular-nums text-text-muted">
+                              {pct.toFixed(1)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-[11px] text-text-muted">
+          &quot;Uploader&quot; is the admin user who uploaded the most photos in
+          this album. Albums created before quotas were introduced show
+          &quot;unknown&quot;.
+        </p>
       </section>
 
       {/* Section D — Recent exports */}
@@ -398,14 +483,15 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
       {/* Section F — Filesystems visible to the gallery-app process */}
       <section className="mt-8">
         <h2 className="text-sm uppercase tracking-widest text-text-muted mb-3">
-          Filesystems
+          Filesystems (host)
         </h2>
         <DiskTable rows={disks} />
         <p className="mt-3 text-[11px] text-text-muted">
-          What the gallery-app container sees. Mounted Docker volumes appear here when
-          they are bind-mounted into the container — overlay-only paths are pseudo
-          and hidden. On a Proxmox LXC without Docker this is the host&apos;s full mount
-          table.
+          What the gallery-app container sees. On Proxmox LXC the overlay
+          mount reports the <em>host&apos;s</em> total disk, not the LXC quota
+          (Linux has no way to surface a per-cgroup quota through statfs).
+          For the gallery&apos;s actual footprint use the &quot;Storage used&quot; tile
+          at the top — that&apos;s the SUM of orig_bytes from photos.
         </p>
       </section>
     </div>
