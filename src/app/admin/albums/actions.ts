@@ -119,6 +119,27 @@ export async function reorderPhotosAction(albumId: string, orderedIds: string[])
   await revalidateAlbumTokens(albumId);
 }
 
+/**
+ * One-shot "sort by capture date" — uses EXIF `taken_at` when present
+ * (most cameras stamp it), falls back to `created_at` so post-import
+ * additions land at the end instead of disappearing to position 0.
+ * Filename is the final tiebreaker so DSC0009/DSC0010 stay in the
+ * expected camera-roll sequence when their EXIF timestamps match
+ * (burst-mode shots often share the same second).
+ */
+export async function reorderPhotosByDateAction(albumId: string): Promise<void> {
+  await gate();
+  const rows = await sql<{ id: string }[]>`
+    SELECT id FROM photos
+     WHERE album_id = ${albumId}
+     ORDER BY COALESCE(taken_at, created_at) ASC,
+              filename ASC NULLS LAST,
+              id ASC
+  `;
+  await reorderPhotos(albumId, rows.map((r) => r.id));
+  await revalidateAlbumTokens(albumId);
+}
+
 export async function deletePhotoAction(photoId: string): Promise<void> {
   await gate();
   const rows = await sql<{ album_id: string }[]>`

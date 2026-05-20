@@ -5,14 +5,17 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from "@dnd-kit/sortable";
-import { CheckSquare, XSquare } from "lucide-react";
+import { CalendarClock, CheckSquare, Loader2, XSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PhotoTile, type PhotoTileData } from "./PhotoTile";
 import AdminLightbox from "./AdminLightbox";
 import { BulkActionsBar } from "./BulkActionsBar";
 import { CoverPickerDialog } from "./CoverPickerDialog";
 import { PhotoEditModal } from "./PhotoEditModal";
-import { reorderPhotosAction } from "@/app/admin/albums/actions";
+import {
+  reorderPhotosAction,
+  reorderPhotosByDateAction,
+} from "@/app/admin/albums/actions";
 import type { PhotoRow } from "@/lib/types";
 
 interface PhotoWithThumb extends PhotoRow {
@@ -44,6 +47,7 @@ export function PhotoGrid({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [coverOpen, setCoverOpen] = useState(false);
   const [editPhoto, setEditPhoto] = useState<PhotoTileData | null>(null);
+  const [reorderingByDate, setReorderingByDate] = useState(false);
 
   const sensors = useSensors(
     // Desktop: small drag distance triggers reorder.
@@ -113,6 +117,17 @@ export function PhotoGrid({
     setSelectedIds(new Set());
   }
 
+  async function onReorderByDate() {
+    if (!data || reorderingByDate) return;
+    setReorderingByDate(true);
+    try {
+      await reorderPhotosByDateAction(data.album.id);
+      await reload();
+    } finally {
+      setReorderingByDate(false);
+    }
+  }
+
   if (!data) return <p className="text-sm text-zinc-500">Loading photos…</p>;
   if (data.photos.length === 0) return <p className="text-sm text-zinc-500">No photos yet — drag some in.</p>;
 
@@ -140,27 +155,44 @@ export function PhotoGrid({
 
   return (
     <div>
-      {/* Selection toolbar trigger */}
+      {/* Selection + reorder toolbar */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        {!selectionMode ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {!selectionMode ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => enterSelection()}
+              className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+            >
+              <CheckSquare className="mr-1 h-4 w-4" aria-hidden /> Select
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={exitSelection}
+              className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+            >
+              <XSquare className="mr-1 h-4 w-4" aria-hidden /> Done
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
-            onClick={() => enterSelection()}
-            className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+            onClick={onReorderByDate}
+            disabled={reorderingByDate || selectionMode}
+            title="Sort photos by EXIF capture date (falls back to upload time)"
+            className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <CheckSquare className="mr-1 h-4 w-4" aria-hidden /> Select
+            {reorderingByDate ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <CalendarClock className="mr-1 h-4 w-4" aria-hidden />
+            )}
+            Reorder by date
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={exitSelection}
-            className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-          >
-            <XSquare className="mr-1 h-4 w-4" aria-hidden /> Done
-          </Button>
-        )}
+        </div>
         <p className="text-xs text-zinc-500">
           {selectionMode ? "Tap photos to select · long-press also works on desktop" : "Drag to reorder · long-press to multi-select"}
         </p>
@@ -177,13 +209,20 @@ export function PhotoGrid({
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={order} strategy={rectSortingStrategy} disabled={selectionMode}>
-          <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-6 gap-3 px-1">
+          {/* Row-major grid (was CSS multi-column which fills column-by-column
+            * and made the sort_order from upload look "scrambled" — DSC0001
+            * landed top-left, DSC0002 below it, DSC0005 top of the next
+            * column. Grid lays out left-to-right, top-to-bottom, matching
+            * how operators read the gallery. Tiles keep their natural
+            * aspectRatio (set inline by PhotoTile) so wide and tall photos
+            * coexist; each row's height is the tallest tile in that row. */}
+          <div className="grid grid-cols-2 gap-3 px-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {tiles.map((t) => {
               const ratio = t.width && t.height ? t.height / t.width : 1;
               const estH = Math.max(120, Math.round(280 * ratio));
               return (
                 <div
-                  className="group mb-3 break-inside-avoid gallery-row"
+                  className="group gallery-row"
                   key={t.id}
                   style={{ ["--row-h" as string]: `${estH}px` }}
                 >
