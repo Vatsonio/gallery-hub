@@ -285,13 +285,13 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
           <AnimatedStatTile
             label="Albums"
             value={stats.albums_total}
-            Icon={Images}
+            icon={<Images className="size-4" />}
             emptyHint="No albums yet"
           />
           <AnimatedStatTile
             label="Photos"
             value={stats.photos_total}
-            Icon={Camera}
+            icon={<Camera className="size-4" />}
             sparkline={
               <Sparkline
                 points={fillDays(tileSeries.photos, fillCount)}
@@ -306,7 +306,7 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
             label="Storage"
             value={stats.storage_bytes}
             asBytes
-            Icon={HardDrive}
+            icon={<HardDrive className="size-4" />}
             sparkline={
               <Sparkline
                 points={fillDays(tileSeries.storage, fillCount)}
@@ -321,7 +321,7 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
             label={`Views (${period})`}
             value={totalViews}
             accent
-            Icon={Eye}
+            icon={<Eye className="size-4" />}
             sparkline={
               <Sparkline
                 points={trend}

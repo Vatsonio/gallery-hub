@@ -83,7 +83,7 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
           label="Storage used"
           value={formatBytes(storage.bytes)}
           subLine={`${formatCount(storage.photos)} photos across ${formatCount(storage.albums)} albums`}
-          Icon={HardDrive}
+          icon={<HardDrive className="h-4 w-4" />}
         />
         <MetricsKpiTile
           label="Views (7d)"
@@ -94,20 +94,20 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
               : `vs prior 7d (${formatCount(views.views7dPrior)})`
           }
           deltaPct={delta}
-          Icon={Eye}
+          icon={<Eye className="h-4 w-4" />}
           accent
         />
         <MetricsKpiTile
           label="Active viewers (7d)"
           value={formatCount(views.activeViewers7d)}
           subLine={`${formatCount(views.newViewers7d)} new this week`}
-          Icon={UsersIcon}
+          icon={<UsersIcon className="h-4 w-4" />}
         />
         <MetricsKpiTile
           label="Favorites (7d)"
           value={formatCount(favorites.favorites7d)}
           subLine={`${formatCount(favorites.favoritesAllTime)} all-time`}
-          Icon={Heart}
+          icon={<Heart className="h-4 w-4" />}
         />
       </section>
 

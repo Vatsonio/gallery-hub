@@ -1,7 +1,5 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
-
 interface Props {
   label: string;
   /** Pre-formatted headline value. */
@@ -9,7 +7,13 @@ interface Props {
   subLine?: string;
   /** Optional signed delta (positive = green, negative = rose). */
   deltaPct?: number | null;
-  Icon: LucideIcon;
+  /**
+   * Pre-rendered icon element (e.g. `<HardDrive className="h-4 w-4" />`).
+   * We accept a ReactNode rather than the LucideIcon component reference
+   * because RSC cannot serialise function-typed props across the
+   * server→client boundary — passing the element bypasses that.
+   */
+  icon: React.ReactNode;
   accent?: boolean;
 }
 
@@ -18,7 +22,7 @@ export function MetricsKpiTile({
   value,
   subLine,
   deltaPct,
-  Icon,
+  icon,
   accent,
 }: Props): React.JSX.Element {
   const hasDelta = deltaPct !== undefined && deltaPct !== null && Number.isFinite(deltaPct);
@@ -38,7 +42,7 @@ export function MetricsKpiTile({
             accent ? "bg-rose-500/15 text-rose-300" : "bg-bg-card text-text-muted"
           }`}
         >
-          <Icon className="h-4 w-4" />
+          {icon}
         </span>
         <p className="text-xs uppercase tracking-widest text-text-muted">{label}</p>
       </div>

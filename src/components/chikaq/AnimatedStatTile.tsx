@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Camera } from "lucide-react";
 import { useCountUp } from "@/lib/useCountUp";
 import { formatBytes, formatCount } from "@/lib/format";
 
@@ -18,14 +17,19 @@ interface Props {
   /** When true, render the value as a smart byte string instead of a count. */
   asBytes?: boolean;
   accent?: boolean;
-  Icon: typeof Camera;
+  /**
+   * Pre-rendered icon element. RSC cannot serialise function-typed props
+   * across the server→client boundary, so the parent renders the icon
+   * (e.g. `<Camera className="size-4" />`) and slots it in here.
+   */
+  icon: React.ReactNode;
   /** Sparkline SVG (server-rendered) slotted under the headline number. */
   sparkline?: React.ReactNode;
   /** Soft hint shown when the value is zero — e.g. "No views yet". */
   emptyHint?: string;
 }
 
-export function AnimatedStatTile({ label, value, asBytes, accent, Icon, sparkline, emptyHint }: Props): React.JSX.Element {
+export function AnimatedStatTile({ label, value, asBytes, accent, icon, sparkline, emptyHint }: Props): React.JSX.Element {
   // We start the count-up at 0 on first mount so the user sees the tile
   // breathe. Once the animation lands, subsequent value changes animate
   // from the prior settled value.
@@ -43,7 +47,7 @@ export function AnimatedStatTile({ label, value, asBytes, accent, Icon, sparklin
     <div className="group relative rounded-xl border border-line bg-bg-elevated p-4 transition-shadow duration-200 hover:shadow-[0_0_0_1.5px_rgba(255,77,109,0.18)]">
       <div className="flex items-start gap-3">
         <div className={`rounded-lg p-2 ${accent ? "bg-rose-accent/15 text-rose-accent" : "bg-bg-card text-text-muted"}`}>
-          <Icon className="size-4" />
+          {icon}
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[10px] uppercase tracking-widest text-text-muted">{label}</p>
