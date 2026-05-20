@@ -109,6 +109,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span>Sign out</span>
           </button>
         </form>
+        <div
+          className="px-3 py-2 text-[10px] uppercase tracking-widest text-text-muted/60 border-t border-line font-mono"
+          title="APP_VERSION — image build tag of the currently-running container"
+        >
+          v{process.env.APP_VERSION ?? "dev"}
+        </div>
       </aside>
       <main className="flex-1 min-w-0">
         <ToastProvider>{children}</ToastProvider>

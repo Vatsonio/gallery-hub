@@ -47,4 +47,12 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# Build metadata baked into the image. CI passes APP_VERSION=sha-<git sha>
+# via --build-arg; at runtime compose can still override it (env wins over
+# ENV). This shows up in the admin sidebar footer + the startup log line
+# (src/instrumentation.ts) so operators can spot stale containers at a
+# glance.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 CMD ["node", "server.js"]
