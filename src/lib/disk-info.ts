@@ -27,18 +27,75 @@ export async function getDiskInfo(): Promise<DiskRow[]> {
   return tryStatfsFallback();
 }
 
+// BusyBox `df` (Alpine, our prod image) does not support GNU coreutils' `-x`
+// flag, so the filter step has to live in JS. These are the pseudo /
+// virtual filesystem types that pollute the table with 0-byte rows or
+// duplicate /dev/* bind mounts for /etc/resolv.conf, /etc/hostname, etc.
+const PSEUDO_FSTYPES = new Set([
+  "tmpfs",
+  "devtmpfs",
+  "squashfs",
+  "proc",
+  "sysfs",
+  "cgroup",
+  "cgroup2",
+  "cgroupv2",
+  "mqueue",
+  "pstore",
+  "bpf",
+  "binfmt_misc",
+  "autofs",
+  "debugfs",
+  "tracefs",
+  "hugetlbfs",
+  "fusectl",
+  "securityfs",
+  "nsfs",
+  "ramfs",
+]);
+
+// Inside a container the kernel bind-mounts the host disk into config
+// paths like /etc/hostname, /etc/resolv.conf, /etc/hosts. They surface as
+// extra `ext4` rows pointing at the same backing device — useless noise
+// for a "what disk does the gallery have" view. Plain Linux hosts don't
+// have ext4 mounted under /etc/, /dev/, /proc/, /sys/, so this prefix
+// filter is safe outside containers too.
+const PSEUDO_MOUNT_PREFIXES = ["/etc/", "/dev/", "/proc/", "/sys/", "/run/"];
+
+function isPseudoMount(mount: string): boolean {
+  return PSEUDO_MOUNT_PREFIXES.some((p) => mount.startsWith(p));
+}
+
 async function tryDf(): Promise<DiskRow[]> {
   try {
     const { stdout } = await execAsync(
-      // -P: POSIX one-line-per-fs · -B1: bytes · -T: include fstype
-      // -x: skip pseudo / virtual / overlay-tmpfs-ish entries that
-      // pollute the table with 0-byte rows.
-      "df -PT -B1 -x tmpfs -x devtmpfs -x squashfs -x overlay -x proc -x sysfs",
+      // -P: POSIX one-line-per-fs · -B1: bytes · -T: include fstype.
+      // We deliberately omit -x because BusyBox df doesn't accept it;
+      // PSEUDO_FSTYPES + the dedupe pass below do the same job in JS so
+      // the same code path works on Alpine prod and Debian dev.
+      "df -PT -B1",
       { timeout: 5_000 },
     );
     const lines = stdout.trim().split("\n");
     if (lines.length < 2) return [];
-    return lines.slice(1).map(parseDfLine).filter((r): r is DiskRow => r !== null);
+    const parsed = lines.slice(1).map(parseDfLine).filter((r): r is DiskRow => r !== null);
+
+    const filtered = parsed.filter(
+      (r) => !PSEUDO_FSTYPES.has(r.fstype) && !isPseudoMount(r.mount),
+    );
+
+    // Dedupe leftover overlap by (source, totalBytes) — picks the shortest
+    // mount path so "/" beats any deeper alias. Belt-and-braces on top of
+    // the prefix filter above.
+    const seen = new Map<string, DiskRow>();
+    for (const r of filtered) {
+      const key = `${r.source}|${r.totalBytes}`;
+      const prev = seen.get(key);
+      if (!prev || r.mount.length < prev.mount.length) {
+        seen.set(key, r);
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.mount.localeCompare(b.mount));
   } catch {
     return [];
   }
