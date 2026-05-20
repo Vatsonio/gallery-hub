@@ -313,7 +313,17 @@ export function Dropzone({ albumId, onComplete }: Props) {
   }, [inFlight, hasErrors, rows.length]);
 
   const onDrop = useCallback(async (accepted: File[]) => {
-    const newRows: RowState[] = accepted.map((f) => {
+    // Browsers (and react-dropzone) don't guarantee the dropped File[]
+    // order matches the photographer's intent — Windows Explorer drag
+    // often hands them back in OS selection order or arbitrary indexed
+    // order, and `Promise.all(measure)` can't reorder anything because
+    // the issue is upstream. Sort by filename with numeric-aware compare
+    // ("DSC0009.jpg" < "DSC0010.jpg") so the gallery's sort_order matches
+    // the natural camera-roll sequence.
+    const sortedAccepted = [...accepted].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+    );
+    const newRows: RowState[] = sortedAccepted.map((f) => {
       const id = crypto.randomUUID();
       fileMap.current.set(id, f);
       return {
