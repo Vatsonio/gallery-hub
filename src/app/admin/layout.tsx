@@ -109,16 +109,39 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span>Sign out</span>
           </button>
         </form>
-        <div
-          className="px-3 py-2 text-[10px] uppercase tracking-widest text-text-muted/60 border-t border-line font-mono"
-          title="APP_VERSION — image build tag of the currently-running container"
-        >
-          v{process.env.APP_VERSION ?? "dev"}
-        </div>
+        {isOwner ? <BuildBadge /> : null}
       </aside>
       <main className="flex-1 min-w-0">
         <ToastProvider>{children}</ToastProvider>
       </main>
+    </div>
+  );
+}
+
+/**
+ * Owner-only build chip. Splits APP_VERSION into a label + optional short
+ * SHA: "sha-abcd1234..." → label "build" / short "abcd123". For tag-style
+ * versions ("smoke", "prod", "v1.2") we just show the raw value.
+ */
+function BuildBadge(): React.JSX.Element {
+  const raw = process.env.APP_VERSION ?? "dev";
+  const shaMatch = /^sha-([0-9a-f]{7,40})$/i.exec(raw);
+  const short = shaMatch ? shaMatch[1].slice(0, 7) : null;
+  return (
+    <div
+      className="border-t border-line px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-text-muted/70"
+      title={`APP_VERSION=${raw}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span>version</span>
+        <span className="text-text/80">{short ? `sha-${short}` : raw}</span>
+      </div>
+      {short ? (
+        <div className="mt-0.5 flex items-center justify-between gap-2">
+          <span>build</span>
+          <span className="truncate text-text/60">{shaMatch?.[1]}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

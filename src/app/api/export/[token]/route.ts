@@ -13,6 +13,7 @@ import {
   getPresignedUrl,
 } from "@/lib/minio";
 import {
+  buildArchiveFilename,
   buildCacheKey,
   favoritesSignature,
   type ExportScope,
@@ -261,12 +262,16 @@ export async function GET(
   const sig = scope === "favorites" ? favoritesSignature(photos.map((p) => p.id)) : "all";
   const cacheKey = buildCacheKey(token, scope, variant, new Date());
 
+  const archiveName = buildArchiveFilename(albumForNotify?.slug, scope);
+
   // Cache lookup. Same-day signature match → presigned redirect.
   try {
     const head = await headObject(cacheKey);
     const cachedSig = head.Metadata?.["favorites_signature"];
     if (cachedSig === sig) {
-      const presigned = await getPresignedUrl(cacheKey, 3600);
+      const presigned = await getPresignedUrl(cacheKey, 3600, undefined, {
+        responseContentDisposition: `attachment; filename="${archiveName}"`,
+      });
       const cachedBytes = head.ContentLength ?? 0;
       await logExport(token, viewerId, scope, variant, cachedBytes);
       safeCapture({
@@ -413,7 +418,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${token}-${scope}-${variant}.zip"`,
+      "Content-Disposition": `attachment; filename="${archiveName}"`,
       "Cache-Control": "no-store",
     },
   });

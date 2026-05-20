@@ -211,6 +211,8 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
   const deltaPct = prevHalf === 0 ? null : Math.round(((lastHalf - prevHalf) / prevHalf) * 100);
 
   const dashboardUrl = process.env.POSTHOG_DASHBOARD_URL ?? "";
+  const posthogHost = process.env.POSTHOG_HOST ?? process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "";
+  const analyticsEnabled = (process.env.POSTHOG_KEY ?? "").length > 0;
   const renderedAtIso = new Date().toISOString();
 
   return (
@@ -227,6 +229,24 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
               <span>{periodLabel(period)}</span>
               <span aria-hidden>·</span>
               <RefreshedTimer renderedAtIso={renderedAtIso} />
+              <span aria-hidden>·</span>
+              <span
+                className={`inline-flex items-center gap-1.5 ${
+                  analyticsEnabled ? "text-emerald-300" : "text-text-muted"
+                }`}
+                title={
+                  analyticsEnabled
+                    ? "POSTHOG_KEY is set — server-side events are being captured"
+                    : "POSTHOG_KEY is empty — analytics is disabled"
+                }
+              >
+                <span
+                  className={`inline-block size-1.5 rounded-full ${
+                    analyticsEnabled ? "bg-emerald-400" : "bg-text-muted"
+                  }`}
+                />
+                {analyticsEnabled ? "Analytics live" : "Analytics off"}
+              </span>
             </p>
           </div>
           <Link
@@ -394,14 +414,27 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
         <section>
           <Panel title="Deep analytics" subtitle="PostHog dashboard" Icon={Sparkles}>
             {dashboardUrl ? (
-              <div className="rounded-lg overflow-hidden border border-line bg-black">
-                <iframe
-                  src={dashboardUrl}
-                  className="block w-full h-[640px]"
-                  title="PostHog dashboard"
-                  loading="lazy"
-                />
-              </div>
+              <>
+                <div className="rounded-lg overflow-hidden border border-line bg-black">
+                  <iframe
+                    src={dashboardUrl}
+                    className="block w-full h-[640px]"
+                    title="PostHog dashboard"
+                    loading="lazy"
+                  />
+                </div>
+                {posthogHost ? (
+                  <a
+                    href={posthogHost}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-flex items-center gap-1 text-xs text-text-muted hover:text-rose-300 transition"
+                  >
+                    Open PostHog in a new tab
+                    <ArrowUpRight className="size-3" />
+                  </a>
+                ) : null}
+              </>
             ) : (
               <div className="rounded-lg border border-dashed border-line bg-bg-card/60 px-6 py-10 text-center">
                 <p className="text-sm text-text-muted">
@@ -416,6 +449,17 @@ export default async function ChikaqPage({ searchParams }: PageProps): Promise<R
                   </code>{" "}
                   env var, and reload.
                 </p>
+                {posthogHost ? (
+                  <a
+                    href={posthogHost}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 inline-flex items-center gap-1 rounded-lg bg-rose-accent hover:bg-rose-hover text-white px-4 py-2 text-sm font-medium transition"
+                  >
+                    Open PostHog
+                    <ArrowUpRight className="size-4" />
+                  </a>
+                ) : null}
               </div>
             )}
           </Panel>

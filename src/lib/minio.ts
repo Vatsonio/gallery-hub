@@ -81,10 +81,21 @@ export async function getObjectStream(key: string, bucket: string = BUCKET): Pro
  * the browser. Wraps the existing s3SignerClient so callers don't have
  * to know about the internal/public client split.
  */
-export async function getPresignedUrl(key: string, ttlSec: number, bucket: string = BUCKET): Promise<string> {
-  return getSignedUrl(s3SignerClient, new GetObjectCommand({ Bucket: bucket, Key: key }), {
-    expiresIn: ttlSec,
-  });
+export async function getPresignedUrl(
+  key: string,
+  ttlSec: number,
+  bucket: string = BUCKET,
+  opts: { responseContentDisposition?: string } = {},
+): Promise<string> {
+  return getSignedUrl(
+    s3SignerClient,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ResponseContentDisposition: opts.responseContentDisposition,
+    }),
+    { expiresIn: ttlSec },
+  );
 }
 
 export async function deleteObject(key: string, bucket: string = BUCKET): Promise<void> {

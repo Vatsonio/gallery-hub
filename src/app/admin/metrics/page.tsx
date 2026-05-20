@@ -63,12 +63,18 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
         <span className="grid h-9 w-9 place-items-center rounded-lg bg-rose-500/15 text-rose-300">
           <BarChart3 className="h-4 w-4" />
         </span>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-light text-white">Metrics</h1>
           <p className="text-sm text-text-muted">
             Operational health at a glance. PostHog still owns granular product analytics.
           </p>
         </div>
+        <span
+          className="rounded-full border border-line bg-bg-elevated px-3 py-1 font-mono text-[11px] text-text-muted"
+          title="APP_VERSION baked into the running image"
+        >
+          v{process.env.APP_VERSION ?? "dev"}
+        </span>
       </div>
 
       {/* Section A — KPIs */}
@@ -273,6 +279,58 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
               </dd>
             </div>
           </dl>
+          <p className="mt-3 text-[11px] text-text-muted/80">
+            Worker pulse · last ready{" "}
+            <span
+              className="text-text/80"
+              title={formatAbsolute(health.lastPhotoReadyAt)}
+            >
+              {health.lastPhotoReadyAt
+                ? formatRelativeTime(health.lastPhotoReadyAt)
+                : "never"}
+            </span>
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-line bg-bg-elevated p-5">
+          <header className="flex items-center gap-2 mb-3">
+            <Activity className="size-4 text-text-muted" />
+            <h2 className="text-sm uppercase tracking-widest text-text-muted">
+              Notification queue
+            </h2>
+          </header>
+          <dl className="grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <dt className="text-text-muted text-xs">Queued</dt>
+              <dd
+                className={`text-xl font-light tabular-nums ${
+                  health.notifications.queued > 50 ? "text-amber-300" : "text-text"
+                }`}
+              >
+                {formatCount(health.notifications.queued)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-text-muted text-xs">Sent (24h)</dt>
+              <dd className="text-xl font-light text-text tabular-nums">
+                {formatCount(health.notifications.sent24h)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-text-muted text-xs">Failed (24h)</dt>
+              <dd
+                className={`text-xl font-light tabular-nums ${
+                  health.notifications.failed24h > 0 ? "text-rose-300" : "text-text"
+                }`}
+              >
+                {formatCount(health.notifications.failed24h)}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-[11px] text-text-muted/80">
+            Persistent queue is normal at zero — failures here usually mean
+            invalid Telegram credentials.
+          </p>
         </div>
 
         <div className="rounded-xl border border-line bg-bg-elevated p-5">

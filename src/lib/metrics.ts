@@ -59,6 +59,13 @@ export interface AdminUserRow {
 
 export interface SystemHealth {
   photosByStatus: { ready: number; processing: number; uploading: number };
+  /** Most recent successful photo processing — null if no photos have ever
+   * been finalised. A stale timestamp + non-zero "processing" usually means
+   * the worker is dead. */
+  lastPhotoReadyAt: string | null;
+  /** notification_log breakdown — queued > 0 with no recent sent means the
+   * dispatcher isn't draining. */
+  notifications: { queued: number; sent24h: number; failed24h: number };
   viewEventsRows: number;
   viewEventsBytes: number;
   admins: AdminUserRow[];
@@ -266,22 +273,46 @@ interface AdminDbRow {
   last_login_at: Date | null;
 }
 
+interface LastReadyRow { at: Date | null }
+interface NotifBucketRow { bucket: string; count: bigint | string | null }
+
 export async function getSystemHealth(): Promise<SystemHealth> {
-  const [statusRows, relRows, eventCountRows, adminRows] = await Promise.all([
-    sql<PhotoStatusRow[]>`
-      SELECT status::text AS status, COUNT(*)::bigint AS count
-        FROM photos
-       GROUP BY status
-    `,
-    sql<RelSizeRow[]>`SELECT pg_total_relation_size('view_events')::bigint AS bytes`,
-    sql<CountRow[]>`SELECT reltuples::bigint AS count FROM pg_class WHERE relname = 'view_events'`,
-    sql<AdminDbRow[]>`
-      SELECT id, email, role, name, last_login_at
-        FROM admin_users
-       WHERE disabled_at IS NULL
-       ORDER BY last_login_at DESC NULLS LAST, created_at ASC
-    `,
-  ]);
+  const [statusRows, relRows, eventCountRows, adminRows, lastReadyRows, notifRows] =
+    await Promise.all([
+      sql<PhotoStatusRow[]>`
+        SELECT status::text AS status, COUNT(*)::bigint AS count
+          FROM photos
+         GROUP BY status
+      `,
+      sql<RelSizeRow[]>`SELECT pg_total_relation_size('view_events')::bigint AS bytes`,
+      sql<CountRow[]>`SELECT reltuples::bigint AS count FROM pg_class WHERE relname = 'view_events'`,
+      sql<AdminDbRow[]>`
+        SELECT id, email, role, name, last_login_at
+          FROM admin_users
+         WHERE disabled_at IS NULL
+         ORDER BY last_login_at DESC NULLS LAST, created_at ASC
+      `,
+      sql<LastReadyRow[]>`
+        SELECT MAX(updated_at) AS at FROM photos WHERE status = 'ready'
+      `,
+      // Buckets queued (all-time, awaiting dispatch) + sent/failed in last 24h.
+      // notification_log isn't guaranteed to exist in older snapshots — wrap
+      // in a try so a missing-relation error doesn't 500 the whole page.
+      sql<NotifBucketRow[]>`
+        SELECT bucket, count FROM (
+          SELECT 'queued'::text   AS bucket, COUNT(*)::bigint AS count
+            FROM notification_log WHERE status = 'queued'
+          UNION ALL
+          SELECT 'sent24h'::text  AS bucket, COUNT(*)::bigint AS count
+            FROM notification_log
+           WHERE status = 'sent' AND COALESCE(sent_at, created_at) > now() - interval '24 hours'
+          UNION ALL
+          SELECT 'failed24h'::text AS bucket, COUNT(*)::bigint AS count
+            FROM notification_log
+           WHERE status = 'failed' AND created_at > now() - interval '24 hours'
+        ) s
+      `.catch(() => [] as NotifBucketRow[]),
+    ]);
 
   const byStatus: SystemHealth["photosByStatus"] = { ready: 0, processing: 0, uploading: 0 };
   for (const r of statusRows) {
@@ -291,8 +322,18 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     else if (r.status === "uploading") byStatus.uploading = c;
   }
 
+  const notif = { queued: 0, sent24h: 0, failed24h: 0 };
+  for (const r of notifRows) {
+    const c = num(r.count);
+    if (r.bucket === "queued") notif.queued = c;
+    else if (r.bucket === "sent24h") notif.sent24h = c;
+    else if (r.bucket === "failed24h") notif.failed24h = c;
+  }
+
   return {
     photosByStatus: byStatus,
+    lastPhotoReadyAt: lastReadyRows[0]?.at ? lastReadyRows[0].at.toISOString() : null,
+    notifications: notif,
     viewEventsRows: num(eventCountRows[0]?.count),
     viewEventsBytes: num(relRows[0]?.bytes),
     admins: adminRows.map((a) => ({
