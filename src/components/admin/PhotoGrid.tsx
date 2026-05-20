@@ -199,12 +199,37 @@ export function PhotoGrid({
       </div>
 
       {selectionMode && (
-        <BulkActionsBar
-          albumId={data.album.id}
-          selectedIds={[...selectedIds]}
-          onClear={exitSelection}
-          onCommitted={() => { reload(); }}
-        />
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+            <span className="tabular-nums">
+              Selected <span className="text-zinc-200">{selectedIds.size}</span> / {data.photos.length}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectedIds(new Set(data.photos.map((p) => p.id)))}
+              disabled={selectedIds.size === data.photos.length}
+              className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Select all
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={selectedIds.size === 0}
+              className="cursor-pointer border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Deselect
+            </Button>
+          </div>
+          <BulkActionsBar
+            albumId={data.album.id}
+            selectedIds={[...selectedIds]}
+            onClear={exitSelection}
+            onCommitted={() => { reload(); }}
+          />
+        </>
       )}
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
@@ -216,13 +241,19 @@ export function PhotoGrid({
             * how operators read the gallery. Tiles keep their natural
             * aspectRatio (set inline by PhotoTile) so wide and tall photos
             * coexist; each row's height is the tallest tile in that row. */}
-          <div className="grid grid-cols-2 gap-3 px-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          {/* items-start = tiles align to the top of each row rather than
+            * stretching to fill the row's tallest cell. Without it, when
+            * the last row has only one tile and an earlier row has a tall
+            * portrait, the bottom-row tile would visually stretch to match.
+            * `auto-rows-min` lets each row's height be driven by the
+            * tallest tile in it instead of becoming 1fr of remaining space. */}
+          <div className="grid grid-cols-2 items-start gap-3 px-1 auto-rows-min sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {tiles.map((t) => {
               const ratio = t.width && t.height ? t.height / t.width : 1;
               const estH = Math.max(120, Math.round(280 * ratio));
               return (
                 <div
-                  className="group gallery-row"
+                  className="group gallery-row min-h-[120px]"
                   key={t.id}
                   style={{ ["--row-h" as string]: `${estH}px` }}
                 >
