@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
 import { loadAlbumStats } from "@/lib/albumStats";
+import { loadSettings } from "@/lib/settings";
 import { StatsStrip } from "@/components/admin/StatsStrip";
 import AlbumUploadAndGrid from "@/components/admin/AlbumUploadAndGrid";
 import { AlbumSettingsPanel } from "@/components/admin/AlbumSettingsPanel";
@@ -42,11 +43,15 @@ export default async function AlbumDetailPage({ params }: Props) {
   const album = await getAlbumBySlug(slug);
   if (!album) notFound();
   const albumId = album.id;
-  const [photos, link, stats] = await Promise.all([
+  const [photos, link, stats, settings] = await Promise.all([
     listPhotos(albumId),
     loadShareLinkSummary(albumId),
     loadAlbumStats(albumId),
+    loadSettings(),
   ]);
+  const albumCapBytes = settings.uploads.max_album_gb > 0
+    ? settings.uploads.max_album_gb * 1_000_000_000
+    : null;
 
   async function handleCreate() {
     "use server";
@@ -85,6 +90,7 @@ export default async function AlbumDetailPage({ params }: Props) {
         downloads={0}
         storageBytes={stats.storage_bytes}
         libraryBytes={stats.library_bytes}
+        albumCapBytes={albumCapBytes}
         shotFrom={stats.shot_from}
         shotTo={stats.shot_to}
         topCamera={stats.top_camera}

@@ -14,6 +14,9 @@ interface Props {
   storageBytes?: number;
   /** Bytes across the whole library — used for the relative-share bar. */
   libraryBytes?: number;
+  /** Per-album upload cap (bytes). When set, the meter shows progress
+   * vs the album cap; when undefined, falls back to %-of-library. */
+  albumCapBytes?: number | null;
   /** Earliest taken_at, ISO. */
   shotFrom?: string | null;
   /** Latest taken_at, ISO. */
@@ -108,15 +111,24 @@ export function StatsStrip({
   downloads,
   storageBytes,
   libraryBytes,
+  albumCapBytes,
   shotFrom,
   shotTo,
   topCamera,
   topCameraPct,
 }: Props): React.JSX.Element {
   const dateRange = formatShotRange(shotFrom, shotTo);
-  const storagePct = storageBytes && libraryBytes && libraryBytes > 0
-    ? Math.max(2, Math.min(100, Math.round((storageBytes / libraryBytes) * 100)))
-    : null;
+  // Prefer per-album cap (settings.uploads.max_album_gb) when configured —
+  // that's the meter the operator actually cares about. Fall back to
+  // %-of-library only when no cap is set, which avoids the misleading
+  // "100% of library" we saw when there was only one album.
+  const storagePct =
+    storageBytes && albumCapBytes && albumCapBytes > 0
+      ? Math.max(2, Math.min(100, Math.round((storageBytes / albumCapBytes) * 100)))
+      : storageBytes && libraryBytes && libraryBytes > 0
+        ? Math.max(2, Math.min(100, Math.round((storageBytes / libraryBytes) * 100)))
+        : null;
+  const meterLabel = albumCapBytes ? "of album cap" : "of library";
 
   // Camera chip animates the percentage up too — small touch but ties
   // the chip's visual cadence to the rest of the strip.
@@ -180,7 +192,7 @@ export function StatsStrip({
                 />
               </div>
               <span className="text-[10px] tabular-nums text-zinc-500">
-                {storagePct}% of library
+                {storagePct}% {meterLabel}
               </span>
             </div>
           ) : null

@@ -47,6 +47,13 @@ export interface MaintenanceSettings {
 export interface UploadLimits {
   max_file_size_mb: number;
   max_files_per_album: number;
+  /**
+   * Per-album storage cap in GB. Sum of `orig_bytes` of ready+processing
+   * photos in the album. 0 = disabled (no cap). Enforced by
+   * /api/upload/presign — once an album's photos exceed this, new
+   * presigns return 507 Insufficient Storage.
+   */
+  max_album_gb: number;
 }
 
 export interface AppSettings {
@@ -86,6 +93,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   uploads: {
     max_file_size_mb: 50,
     max_files_per_album: 500,
+    max_album_gb: 0,
   },
 };
 

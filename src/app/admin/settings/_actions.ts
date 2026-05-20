@@ -234,9 +234,15 @@ export async function saveUploadLimits(form: FormData): Promise<void> {
     section,
     { min: 1, max: 1_000_000 },
   );
+  // 0 = disabled (no cap). parsePositiveInt rejects 0, so coerce manually
+  // before validation.
+  const rawAlbumGb = String(form.get("max_album_gb") ?? "0").trim();
+  const max_album_gb = rawAlbumGb === "" || rawAlbumGb === "0"
+    ? 0
+    : parsePositiveInt(rawAlbumGb, "Max album GB", section, { min: 1, max: 1_000_000 });
   await saveSettings(
     {
-      uploads: { max_file_size_mb, max_files_per_album },
+      uploads: { max_file_size_mb, max_files_per_album, max_album_gb },
     },
     owner.userId,
   );

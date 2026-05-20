@@ -7,6 +7,7 @@ import { originalKey, extFromContentType } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
 import { loadSettings } from "@/lib/settings";
 import { getStorageUsage } from "@/lib/storage-usage";
+import { sql } from "@/lib/db";
 import type { PresignRequestBody, PresignResponse } from "@/lib/types";
 
 // Hard upper bound on a single presign batch — guards Next's default body
@@ -50,6 +51,37 @@ export async function POST(req: Request): Promise<Response> {
     const capBytes = settings.storage.max_gb * 1_000_000_000;
     if (usage.usedBytes >= capBytes) {
       return NextResponse.json({ reason: "storage_full" }, { status: 507 });
+    }
+  }
+
+  // Per-album cap (0 = disabled). Sums all photos already in this album
+  // (ready + processing) and rejects the batch if the new files would
+  // push it over. Computed inline because storage-usage's getStorageUsage()
+  // is gallery-wide; this needs the per-album figure.
+  const albumCapGb = settings.uploads.max_album_gb;
+  if (albumCapGb && albumCapGb > 0) {
+    const rows = await sql<{ used_bytes: string | null }[]>`
+      SELECT COALESCE(SUM(orig_bytes), 0)::text AS used_bytes
+      FROM photos
+      WHERE album_id = ${album.id}
+        AND status IN ('ready', 'processing')
+    `;
+    const usedBytes = Number(rows[0]?.used_bytes ?? "0");
+    const incomingBytes = body.files.reduce(
+      (acc, f) => acc + (typeof f.size === "number" && f.size > 0 ? f.size : 0),
+      0,
+    );
+    const capBytes = albumCapGb * 1_000_000_000;
+    if (usedBytes + incomingBytes > capBytes) {
+      return NextResponse.json(
+        {
+          reason: "album_cap_exceeded",
+          used_bytes: usedBytes,
+          incoming_bytes: incomingBytes,
+          cap_bytes: capBytes,
+        },
+        { status: 507 },
+      );
     }
   }
 

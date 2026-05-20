@@ -475,6 +475,22 @@ export default async function SettingsPage({
               className={`mt-1 ${inputCls}`}
             />
           </label>
+          <label className="block md:col-span-2">
+            <span className={labelCls}>Max album size (GB)</span>
+            <input
+              type="number"
+              name="max_album_gb"
+              defaultValue={settings.uploads.max_album_gb}
+              min={0}
+              max={1_000_000}
+              step={1}
+              className={`mt-1 ${inputCls}`}
+            />
+            <p className="mt-1 text-xs text-text-muted">
+              Per-album storage cap. New presigns return 507 once an
+              album&apos;s photos exceed this. Set 0 to disable.
+            </p>
+          </label>
           <div className="md:col-span-2 flex justify-end">
             <button type="submit" className={saveBtn}>
               Save upload limits
