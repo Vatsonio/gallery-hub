@@ -43,6 +43,13 @@ services:
 
   gallery-migrate:
     image: ghcr.io/vatsonio/gallery-hub:latest
+    # Force-pull on every `compose up`. Without this, Portainer's redeploy
+    # path resolves `:latest` against Docker's local image cache and a
+    # stack that was previously pulled at SHA-A keeps running SHA-A even
+    # after GHCR moves `:latest` to SHA-B. Watchtower catches it within 5
+    # minutes but the FIRST migrate one-shot would run the stale code
+    # against fresh-or-volume-restored Postgres and exit 1.
+    pull_policy: always
     container_name: gallery-migrate
     restart: "no"
     command: ["npx", "tsx", "scripts/migrate.ts"]
@@ -66,6 +73,7 @@ services:
 
   gallery-app:
     image: ghcr.io/vatsonio/gallery-hub:latest
+    pull_policy: always
     container_name: gallery-app
     restart: unless-stopped
     labels:
@@ -111,6 +119,7 @@ services:
 
   gallery-worker:
     image: ghcr.io/vatsonio/gallery-hub-worker:latest
+    pull_policy: always
     container_name: gallery-worker
     restart: unless-stopped
     labels:
