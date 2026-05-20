@@ -103,7 +103,7 @@ services:
       gallery-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/health || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -155,6 +155,18 @@ services:
     depends_on:
       gallery-minio:
         condition: service_healthy
+    networks:
+      - smoke
+
+  smoke-cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: smoke-cloudflared
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - gallery-app
     networks:
       - smoke
 
