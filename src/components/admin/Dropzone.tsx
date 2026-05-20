@@ -323,7 +323,9 @@ export function Dropzone({ albumId, onComplete }: Props) {
     const sortedAccepted = [...accepted].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
     );
-    const newRows: RowState[] = sortedAccepted.map((f) => {
+    if (sortedAccepted.length === 0) return;
+
+    const batchRows: RowState[] = sortedAccepted.map((f) => {
       const id = crypto.randomUUID();
       fileMap.current.set(id, f);
       return {
@@ -331,89 +333,134 @@ export function Dropzone({ albumId, onComplete }: Props) {
         progress: 0, status: "pending",
       };
     });
-    setRows((prev) => [...prev, ...newRows]);
+    // ID-set for THIS batch only. Every setRows below goes through
+    // `updateBatch` which gates on this set, so a concurrent drop's
+    // failure handler can never touch rows from a different in-flight
+    // batch — they each see only their own.
+    const batchIds = new Set(batchRows.map((r) => r.id));
+    setRows((prev) => [...prev, ...batchRows]);
 
-    await Promise.all(newRows.map(async (r) => {
-      try {
-        const dim = await measure(fileMap.current.get(r.id)!);
-        setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, ...dim } : x));
-        r.width = dim.width; r.height = dim.height;
-      } catch {
-        setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: "error", error: "could not read image" } : x));
-      }
-    }));
-
-    const body: PresignRequestBody = {
-      album_id: albumId,
-      files: newRows
-        .filter((r) => r.width && r.height)
-        .map((r) => ({ filename: r.filename, size: r.size, contentType: r.contentType })),
+    const updateBatch = (
+      mutator: (row: RowState) => RowState | null,
+    ): void => {
+      setRows((prev) =>
+        prev.map((x) => {
+          if (!batchIds.has(x.id)) return x;
+          return mutator(x) ?? x;
+        }),
+      );
     };
-    const presignRes = await fetch("/api/upload/presign", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!presignRes.ok) {
-      setRows((prev) => prev.map((x) => newRows.some((n) => n.id === x.id) ? { ...x, status: "error", error: "presign failed" } : x));
-      return;
-    }
-    const { items } = (await presignRes.json()) as PresignResponse;
 
-    const eligible = newRows.filter((r) => r.width && r.height);
-    eligible.forEach((r, i) => { r.photoId = items[i].photo_id; });
-    setRows((prev) => prev.map((x) => {
-      const e = eligible.find((er) => er.id === x.id);
-      return e ? { ...x, photoId: e.photoId, status: "uploading" } : x;
-    }));
-
-    const queue = [...eligible];
-    async function worker() {
-      while (queue.length > 0) {
-        const r = queue.shift()!;
-        const idx = eligible.indexOf(r);
-        const url = items[idx].put_url;
-        const file = fileMap.current.get(r.id)!;
+    try {
+      await Promise.all(batchRows.map(async (r) => {
         try {
-          await uploadXHR(url, file, (p) =>
-            setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, progress: p } : x))
-          );
-          setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: "uploaded", progress: 100 } : x));
-        } catch (e) {
-          setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: "error", error: (e as Error).message } : x));
+          const dim = await measure(fileMap.current.get(r.id)!);
+          r.width = dim.width; r.height = dim.height;
+          updateBatch((x) => x.id === r.id ? { ...x, ...dim } : null);
+        } catch {
+          updateBatch((x) => x.id === r.id ? { ...x, status: "error", error: "could not read image" } : null);
         }
-      }
-    }
-    // Concurrency floor. With 150 files × 5–15 MB each going to MinIO, four
-    // workers is the dominant client-side bottleneck — the browser supports
-    // dozens of concurrent connections to a single host and MinIO scales
-    // out PUT throughput linearly to ~16 streams. Default 10 lands the
-    // sweet spot on consumer hardware (200-file batches drop ~50% in
-    // wall-clock vs four workers) without saturating slow uplinks. Override
-    // via NEXT_PUBLIC_UPLOAD_CONCURRENCY for tuning.
-    const envConc = parseInt(process.env.NEXT_PUBLIC_UPLOAD_CONCURRENCY ?? "", 10);
-    const concurrency = Math.max(1, Math.min(32, Number.isFinite(envConc) && envConc > 0 ? envConc : 10));
-    const workers: Promise<void>[] = [];
-    for (let i = 0; i < concurrency; i++) workers.push(worker());
-    await Promise.all(workers);
+      }));
 
-    const finalizeBody: FinalizeRequestBody = {
-      album_id: albumId,
-      photos: eligible
-        .filter((r) => r.photoId && r.width && r.height)
-        .map((r) => ({
-          photo_id: r.photoId!, filename: r.filename,
-          width: r.width!, height: r.height!, size: r.size,
-        })),
-    };
-    if (finalizeBody.photos.length > 0) {
-      await fetch("/api/upload/finalize", {
+      const eligible = batchRows.filter((r) => r.width && r.height);
+      if (eligible.length === 0) return;
+
+      const presignBody: PresignRequestBody = {
+        album_id: albumId,
+        files: eligible.map((r) => ({ filename: r.filename, size: r.size, contentType: r.contentType })),
+      };
+      const presignRes = await fetch("/api/upload/presign", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(finalizeBody),
+        body: JSON.stringify(presignBody),
       });
+      if (!presignRes.ok) {
+        const errText = await presignRes.text().catch(() => "");
+        const reason = (errText || "presign failed").slice(0, 120);
+        // Mark only rows that haven't already errored from measure.
+        updateBatch((x) =>
+          x.status === "pending" ? { ...x, status: "error", error: reason } : null,
+        );
+        return;
+      }
+      const { items } = (await presignRes.json()) as PresignResponse;
+
+      eligible.forEach((r, i) => { r.photoId = items[i].photo_id; });
+      updateBatch((x) => {
+        const e = eligible.find((er) => er.id === x.id);
+        return e ? { ...x, photoId: e.photoId, status: "uploading" } : null;
+      });
+
+      const queue = [...eligible];
+      async function worker() {
+        while (queue.length > 0) {
+          const r = queue.shift()!;
+          const idx = eligible.indexOf(r);
+          const url = items[idx].put_url;
+          const file = fileMap.current.get(r.id)!;
+          try {
+            await uploadXHR(url, file, (p) =>
+              updateBatch((x) => x.id === r.id ? { ...x, progress: p } : null)
+            );
+            updateBatch((x) => x.id === r.id ? { ...x, status: "uploaded", progress: 100 } : null);
+          } catch (e) {
+            updateBatch((x) => x.id === r.id ? { ...x, status: "error", error: (e as Error).message } : null);
+          }
+        }
+      }
+      // Concurrency floor. With 150 files × 5–15 MB each going to MinIO, four
+      // workers is the dominant client-side bottleneck — the browser supports
+      // dozens of concurrent connections to a single host and MinIO scales
+      // out PUT throughput linearly to ~16 streams. Default 10 lands the
+      // sweet spot on consumer hardware (200-file batches drop ~50% in
+      // wall-clock vs four workers) without saturating slow uplinks. Override
+      // via NEXT_PUBLIC_UPLOAD_CONCURRENCY for tuning.
+      const envConc = parseInt(process.env.NEXT_PUBLIC_UPLOAD_CONCURRENCY ?? "", 10);
+      const concurrency = Math.max(1, Math.min(32, Number.isFinite(envConc) && envConc > 0 ? envConc : 10));
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < concurrency; i++) workers.push(worker());
+      await Promise.all(workers);
+
+      const finalizeBody: FinalizeRequestBody = {
+        album_id: albumId,
+        photos: eligible
+          .filter((r) => r.photoId && r.width && r.height)
+          .map((r) => ({
+            photo_id: r.photoId!, filename: r.filename,
+            width: r.width!, height: r.height!, size: r.size,
+          })),
+      };
+      if (finalizeBody.photos.length > 0) {
+        const finalizeRes = await fetch("/api/upload/finalize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(finalizeBody),
+        });
+        if (!finalizeRes.ok) {
+          // The PUTs to MinIO succeeded but the DB insert failed — surface
+          // that on the uploaded rows so the user knows to retry instead
+          // of thinking everything landed.
+          const errText = await finalizeRes.text().catch(() => "");
+          const reason = (errText || "finalize failed").slice(0, 120);
+          updateBatch((x) =>
+            x.status === "uploaded" ? { ...x, status: "error", error: reason } : null,
+          );
+          return;
+        }
+      }
+      onComplete?.();
+    } catch (err) {
+      // Unexpected throw (network, JSON parse, etc.). Affect only rows
+      // from THIS batch that haven't already settled, so a concurrent
+      // batch's in-flight work stays untouched.
+      // eslint-disable-next-line no-console
+      console.error("[upload] batch failed:", err);
+      updateBatch((x) =>
+        x.status === "pending" || x.status === "uploading"
+          ? { ...x, status: "error", error: (err as Error).message ?? "batch failed" }
+          : null,
+      );
     }
-    onComplete?.();
   }, [albumId, onComplete]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
