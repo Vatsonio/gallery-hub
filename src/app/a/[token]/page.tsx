@@ -99,7 +99,13 @@ export default async function PublicGalleryPage({ params }: Props) {
     containerWidth: 1400,
     targetRowHeight: 280,
     gap: 4,
-    maxLastRowScale: 1.5,
+    // 1.0 keeps the last row at the same height as the rest of the
+    // gallery (Flickr / Google Photos convention). Was 1.5 — that let
+    // the trailing 2–3 photos balloon to 420px while every prior row
+    // sat at 280, which the operator flagged as "стретчнутий" bottom
+    // strip. Whitespace on the right of the last row is preferable to
+    // a row that visually breaks the grid rhythm.
+    maxLastRowScale: 1.0,
   });
 
   const mobileRows = layoutJustifiedRows({
@@ -107,7 +113,13 @@ export default async function PublicGalleryPage({ params }: Props) {
     containerWidth: 375,
     targetRowHeight: 200,
     gap: 2,
-    maxLastRowScale: 1.5,
+    // 1.0 keeps the last row at the same height as the rest of the
+    // gallery (Flickr / Google Photos convention). Was 1.5 — that let
+    // the trailing 2–3 photos balloon to 420px while every prior row
+    // sat at 280, which the operator flagged as "стретчнутий" bottom
+    // strip. Whitespace on the right of the last row is preferable to
+    // a row that visually breaks the grid rhythm.
+    maxLastRowScale: 1.0,
   });
 
   const photoMap = new Map(decorated.map((p) => [p.id, p]));

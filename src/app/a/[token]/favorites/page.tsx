@@ -149,7 +149,7 @@ export default async function FavoritesPage({ params }: Props) {
     containerWidth: 1400,
     targetRowHeight: 240,
     gap: 4,
-    maxLastRowScale: 1.5,
+    maxLastRowScale: 1.0,
   });
 
   const mobileRows = layoutJustifiedRows({
@@ -157,7 +157,7 @@ export default async function FavoritesPage({ params }: Props) {
     containerWidth: 375,
     targetRowHeight: 180,
     gap: 2,
-    maxLastRowScale: 1.5,
+    maxLastRowScale: 1.0,
   });
 
   const photoMap = new Map(decorated.map((p) => [p.id, p]));
