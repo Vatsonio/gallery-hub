@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors,
   type DragEndEvent,
@@ -16,6 +16,7 @@ import {
   reorderPhotosAction,
   reorderPhotosByDateAction,
 } from "@/app/admin/albums/actions";
+import { layoutJustifiedRows } from "@/lib/justified";
 import type { PhotoRow } from "@/lib/types";
 
 interface PhotoWithThumb extends PhotoRow {
@@ -48,6 +49,21 @@ export function PhotoGrid({
   const [coverOpen, setCoverOpen] = useState(false);
   const [editPhoto, setEditPhoto] = useState<PhotoTileData | null>(null);
   const [reorderingByDate, setReorderingByDate] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+
+  // Live-measure the grid container so justified-row layout fits without
+  // overflow or wasted gutter. Falls back to 1100 (admin content max width
+  // minus the 240px sidebar) until first paint completes.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setContainerWidth(w);
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   const sensors = useSensors(
     // Desktop: small drag distance triggers reorder.
@@ -128,24 +144,57 @@ export function PhotoGrid({
     }
   }
 
+  // Hooks-before-early-returns rule: build tiles + rows always; the
+  // early returns below are pure render branches that don't touch hook
+  // call order.
+  const byId = useMemo(
+    () => new Map((data?.photos ?? []).map((p) => [p.id, p])),
+    [data],
+  );
+  const tiles: PhotoTileData[] = useMemo(() => {
+    if (!data) return [];
+    return order.flatMap((id) => {
+      const p = byId.get(id);
+      if (!p) return [];
+      return [{
+        id: p.id,
+        thumb_url: p.thumb_url,
+        web_url: p.web_url,
+        large_url: p.large_url,
+        status: p.status,
+        isCover: data.album.cover_photo_id === p.id,
+        albumId: data.album.id,
+        width: p.width,
+        height: p.height,
+      }];
+    });
+  }, [data, order, byId]);
+
+  // Justified-row layout — same engine as the public gallery view. Photos
+  // in each row scale together to fill 100% of width, so heights inside a
+  // row are uniform and rows align as clean horizontal lines (no
+  // "ragged" empty cells from CSS Grid's tallest-item-wins behaviour).
+  // Photos still processing without measured dims are stamped with a
+  // default 3:2 landscape so the row math doesn't divide by zero.
+  const effectiveWidth = containerWidth ?? 1100;
+  const targetRowHeight = effectiveWidth >= 1024 ? 220 : effectiveWidth >= 640 ? 180 : 140;
+  const rows = useMemo(() => {
+    if (tiles.length === 0) return [];
+    return layoutJustifiedRows({
+      photos: tiles.map((t) => ({
+        id: t.id,
+        width: t.width || 600,
+        height: t.height || 400,
+      })),
+      containerWidth: effectiveWidth,
+      targetRowHeight,
+      gap: 8,
+      maxLastRowScale: 1.6,
+    });
+  }, [tiles, effectiveWidth, targetRowHeight]);
+
   if (!data) return <p className="text-sm text-zinc-500">Loading photos…</p>;
   if (data.photos.length === 0) return <p className="text-sm text-zinc-500">No photos yet — drag some in.</p>;
-
-  const byId = new Map(data.photos.map((p) => [p.id, p]));
-  const tiles: PhotoTileData[] = order.map((id) => {
-    const p = byId.get(id)!;
-    return {
-      id: p.id,
-      thumb_url: p.thumb_url,
-      web_url: p.web_url,
-      large_url: p.large_url,
-      status: p.status,
-      isCover: data.album.cover_photo_id === p.id,
-      albumId: data.album.id,
-      width: p.width,
-      height: p.height,
-    };
-  });
 
   const readyOrder = order.filter((id) => byId.get(id)?.status === "ready");
   const openIdx = openPhotoId ? readyOrder.indexOf(openPhotoId) : -1;
@@ -234,40 +283,47 @@ export function PhotoGrid({
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={order} strategy={rectSortingStrategy} disabled={selectionMode}>
-          {/* Row-major grid (was CSS multi-column which fills column-by-column
-            * and made the sort_order from upload look "scrambled" — DSC0001
-            * landed top-left, DSC0002 below it, DSC0005 top of the next
-            * column. Grid lays out left-to-right, top-to-bottom, matching
-            * how operators read the gallery. Tiles keep their natural
-            * aspectRatio (set inline by PhotoTile) so wide and tall photos
-            * coexist; each row's height is the tallest tile in that row. */}
-          {/* items-start = tiles align to the top of each row rather than
-            * stretching to fill the row's tallest cell. Without it, when
-            * the last row has only one tile and an earlier row has a tall
-            * portrait, the bottom-row tile would visually stretch to match.
-            * `auto-rows-min` lets each row's height be driven by the
-            * tallest tile in it instead of becoming 1fr of remaining space. */}
-          <div className="grid grid-cols-2 items-start gap-3 px-1 auto-rows-min sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {tiles.map((t) => {
-              const ratio = t.width && t.height ? t.height / t.width : 1;
-              const estH = Math.max(120, Math.round(280 * ratio));
+          {/* Justified-row layout: each row's tiles flex-grow together to
+            * fill 100% of containerWidth at the row's chosen height. Wide
+            * and portrait shots coexist without leaving "tallest-tile" gaps
+            * the CSS Grid version was bleeding into the screenshot. The
+            * containerWidth comes from ResizeObserver so the layout
+            * recomputes when the sidebar collapses on narrower viewports. */}
+          <div ref={containerRef} className="flex flex-col gap-2 px-1">
+            {rows.map((row, rowIdx) => {
+              const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
               return (
                 <div
-                  className="group gallery-row min-h-[120px]"
-                  key={t.id}
-                  style={{ ["--row-h" as string]: `${estH}px` }}
+                  key={`row-${rowIdx}`}
+                  className="gallery-row flex w-full gap-2"
+                  style={{
+                    height: row.height,
+                    ["--row-h" as string]: `${Math.round(row.height)}px`,
+                  }}
                 >
-                  <PhotoTile
-                    photo={t}
-                    onChange={reload}
-                    onPreview={setOpenPhotoId}
-                    selectionMode={selectionMode}
-                    selected={selectedIds.has(t.id)}
-                    onToggleSelect={toggleSelect}
-                    onLongPress={(id) => enterSelection(id)}
-                    onEdit={setEditPhoto}
-                    onPickCover={() => setCoverOpen(true)}
-                  />
+                  {row.items.map((item) => {
+                    const tile = tiles.find((t) => t.id === item.id);
+                    if (!tile) return null;
+                    return (
+                      <div
+                        key={tile.id}
+                        className="group relative h-full"
+                        style={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      >
+                        <PhotoTile
+                          photo={tile}
+                          onChange={reload}
+                          onPreview={setOpenPhotoId}
+                          selectionMode={selectionMode}
+                          selected={selectedIds.has(tile.id)}
+                          onToggleSelect={toggleSelect}
+                          onLongPress={(id) => enterSelection(id)}
+                          onEdit={setEditPhoto}
+                          onPickCover={() => setCoverOpen(true)}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}

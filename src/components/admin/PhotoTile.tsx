@@ -10,7 +10,7 @@ import {
 import { setCoverAction, deletePhotoAction } from "@/app/admin/albums/actions";
 import { createLongPress } from "@/lib/long-press";
 import { useToast } from "@/components/ui/Toast";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 export interface PhotoTileData {
   id: string;
@@ -72,9 +72,23 @@ export function PhotoTile({
     return createLongPress(() => onLongPress(photo.id), { delayMs: 500 });
   }, [onLongPress, photo.id]);
 
+  // Mobile tap-vs-scroll guard. iOS Safari fires `click` after touchend
+  // even when the user moved their finger far enough that they meant to
+  // scroll — that was opening the lightbox on every flick down the
+  // album page. Track the pointer-down origin in a ref and suppress
+  // click if the pointer travelled more than `TAP_TOLERANCE_PX` before
+  // release.
+  const TAP_TOLERANCE_PX = 10;
+  const tapOrigin = useRef<{ x: number; y: number } | null>(null);
+  const tapMoved = useRef(false);
+
   const canPreview = Boolean(onPreview && photo.status === "ready" && !selectionMode);
 
   function handleTileClick() {
+    if (tapMoved.current) {
+      // Scroll gesture — swallow the click that iOS synthesises anyway.
+      return;
+    }
     if (selectionMode && onToggleSelect) {
       onToggleSelect(photo.id);
       return;
@@ -89,10 +103,34 @@ export function PhotoTile({
       className={`relative w-full overflow-hidden rounded-lg bg-zinc-900 ring-1 select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] ${
         selected ? "ring-2 ring-rose-400" : "ring-white/5"
       }`}
-      onPointerDown={(e) => longPress?.onPointerDown({ clientX: e.clientX, clientY: e.clientY })}
-      onPointerMove={(e) => longPress?.onPointerMove({ clientX: e.clientX, clientY: e.clientY })}
-      onPointerUp={() => longPress?.onPointerUp()}
-      onPointerCancel={() => longPress?.onPointerCancel()}
+      onPointerDown={(e) => {
+        tapOrigin.current = { x: e.clientX, y: e.clientY };
+        tapMoved.current = false;
+        longPress?.onPointerDown({ clientX: e.clientX, clientY: e.clientY });
+      }}
+      onPointerMove={(e) => {
+        if (tapOrigin.current && !tapMoved.current) {
+          const dx = Math.abs(e.clientX - tapOrigin.current.x);
+          const dy = Math.abs(e.clientY - tapOrigin.current.y);
+          if (dx > TAP_TOLERANCE_PX || dy > TAP_TOLERANCE_PX) tapMoved.current = true;
+        }
+        longPress?.onPointerMove({ clientX: e.clientX, clientY: e.clientY });
+      }}
+      onPointerUp={() => {
+        longPress?.onPointerUp();
+        // Reset on the next tick so handleTileClick (synthesised after
+        // pointerup) still sees the latest tapMoved value.
+        const moved = tapMoved.current;
+        setTimeout(() => {
+          tapOrigin.current = null;
+          if (!moved) tapMoved.current = false;
+        }, 0);
+      }}
+      onPointerCancel={() => {
+        longPress?.onPointerCancel();
+        tapOrigin.current = null;
+        tapMoved.current = false;
+      }}
     >
       {displayUrl ? (
         <Image src={displayUrl} alt="" fill sizes="(max-width:640px) 50vw, (max-width:768px) 33vw, (max-width:1024px) 25vw, 16vw" unoptimized className="object-cover" />
