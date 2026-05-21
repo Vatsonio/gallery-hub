@@ -292,6 +292,17 @@ export function PhotoGrid({
           <div ref={containerRef} className="flex flex-col gap-2 px-1">
             {rows.map((row, rowIdx) => {
               const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
+              // Last row that didn't fill the container: pin tile widths
+              // to their natural justified size with `flex: 0 0 Wpx` instead
+              // of letting `flex-grow` stretch them. Without this, an
+              // underfilled tail row distributes the full container width
+              // among 1–3 tiles, blowing each up ~1.5–2× wider than
+              // computed; PhotoTile's aspectRatio then renders ~2× taller
+              // than the wrapper's `h-full = row.height`, pushing the
+              // bottom-right MoreVertical button below the cell bounds.
+              const underfilled =
+                rowIdx === rows.length - 1 &&
+                totalRowWidth < effectiveWidth * 0.97;
               return (
                 <div
                   key={`row-${rowIdx}`}
@@ -308,7 +319,11 @@ export function PhotoGrid({
                       <div
                         key={tile.id}
                         className="group relative h-full"
-                        style={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                        style={{
+                          flex: underfilled
+                            ? `0 0 ${item.width}px`
+                            : `${item.width / totalRowWidth} 0 0`,
+                        }}
                       >
                         <PhotoTile
                           photo={tile}
