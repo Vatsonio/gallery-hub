@@ -49,20 +49,34 @@ export function PhotoGrid({
   const [coverOpen, setCoverOpen] = useState(false);
   const [editPhoto, setEditPhoto] = useState<PhotoTileData | null>(null);
   const [reorderingByDate, setReorderingByDate] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
 
-  // Live-measure the grid container so justified-row layout fits without
-  // overflow or wasted gutter. Falls back to 1100 (admin content max width
-  // minus the 240px sidebar) until first paint completes.
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // Callback ref — fires whenever the container DOM node attaches OR
+  // detaches. Crucial because the component has early returns (loading /
+  // empty states) that mount the container conditionally; a useEffect
+  // with `[]` deps would have run before the container existed, with a
+  // null ref, and never re-fire when data loaded. The result was
+  // containerWidth stuck at the fallback (1100) while the real layout
+  // had ~1128 px, so flex-grow stretched every tile ~3% wider than the
+  // justified math expected and PhotoTile's aspectRatio rule made each
+  // tile ~6 px taller than its wrapper — pushing the bottom-right
+  // MoreVertical button below the cell.
+  const roRef = useRef<ResizeObserver | null>(null);
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
+    if (!node) return;
+    const measure = () => {
+      const w = node.getBoundingClientRect().width;
+      if (w > 0) setContainerWidth(w);
+    };
+    measure();
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0;
       if (w > 0) setContainerWidth(w);
     });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
+    ro.observe(node);
+    roRef.current = ro;
   }, []);
 
   const sensors = useSensors(
