@@ -176,6 +176,7 @@ export default async function FavoritesPage({ params }: Props) {
         <div className="sm:hidden flex flex-col gap-0.5 px-0.5">
           {mobileRows.map((row, i) => {
             const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
+            const underfilled = i === mobileRows.length - 1 && totalRowWidth < 375 * 0.97;
             return (
               <div
                 key={i}
@@ -198,7 +199,11 @@ export default async function FavoritesPage({ params }: Props) {
                       avifUrl={p.avif_url}
                       srcSet={p.web_srcset}
                       thumbhashDataUrl={p.thumbhash_url}
-                      flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      flexStyle={
+                        underfilled
+                          ? { flex: `0 0 ${item.width}px` }
+                          : { flex: `${item.width / totalRowWidth} 0 0` }
+                      }
                       initialFavorited={true}
                       index={idx}
                       priority={idx < 32 ? "high" : "low"}
@@ -213,6 +218,7 @@ export default async function FavoritesPage({ params }: Props) {
         <div className="hidden sm:flex flex-col gap-1 px-1 py-4">
           {desktopRows.map((row, i) => {
             const totalRowWidth = row.items.reduce((s, it) => s + it.width, 0);
+            const underfilled = i === desktopRows.length - 1 && totalRowWidth < 1400 * 0.97;
             return (
               <div
                 key={i}
@@ -235,7 +241,11 @@ export default async function FavoritesPage({ params }: Props) {
                       avifUrl={p.avif_url}
                       srcSet={p.web_srcset}
                       thumbhashDataUrl={p.thumbhash_url}
-                      flexStyle={{ flex: `${item.width / totalRowWidth} 0 0` }}
+                      flexStyle={
+                        underfilled
+                          ? { flex: `0 0 ${item.width}px` }
+                          : { flex: `${item.width / totalRowWidth} 0 0` }
+                      }
                       initialFavorited={true}
                       index={idx}
                       priority={idx < 32 ? "high" : "low"}

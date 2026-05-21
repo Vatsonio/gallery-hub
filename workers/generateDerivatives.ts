@@ -22,15 +22,26 @@ async function bodyToBuffer(body: { transformToByteArray: () => Promise<Uint8Arr
 }
 
 /**
- * Read sharp metadata (orientation-aware width/height) without holding the
- * decoded raster in memory. sharp lazily parses the JPEG/PNG/WEBP header
- * for .metadata() — the full pixel decode never runs.
+ * Read sharp metadata + apply EXIF orientation to width/height. sharp's
+ * `.rotate().metadata()` is misleading: `.rotate()` only takes effect at
+ * actual encode time, while `.metadata()` reads the JPEG/PNG/WEBP header
+ * verbatim. iPhone portrait shots come off the sensor as 4032×3024 landscape
+ * pixels with EXIF Orientation=6 (rotate 90° CW for display); without
+ * swapping ourselves, the gallery's justified-row layout would treat
+ * them as landscape while imgproxy serves them rotated as portrait —
+ * cells end up the wrong shape.
+ *
+ * Orientation values 5–8 are the rotated-90° set; 1 (or null) is upright.
  */
 async function readDimensions(buf: Buffer): Promise<{ width: number; height: number }> {
-  const meta = await sharp(buf).rotate().metadata();
+  const meta = await sharp(buf).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  const orient = meta.orientation ?? 1;
+  const rotated = orient >= 5 && orient <= 8;
   return {
-    width: meta.width ?? 0,
-    height: meta.height ?? 0,
+    width: rotated ? h : w,
+    height: rotated ? w : h,
   };
 }
 
