@@ -1,5 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdminSessionFromCookies } from "@/lib/auth-check";
 import {
   createAlbum, updateAlbum,
@@ -52,7 +53,13 @@ async function gate(): Promise<void> {
   // requireAdmin() helper uses for its DB-bound call sites.
   if (process.env.GH_TEST_BYPASS_AUTH === "1") return;
   const auth = await requireAdminSessionFromCookies();
-  if (!auth.ok) throw new Error("unauthorized");
+  if (!auth.ok) {
+    // Used to `throw new Error("unauthorized")`. In prod Next masks the
+    // message as a generic "Server Components render" toast and the
+    // operator has no idea their session lapsed while they were
+    // mid-edit. redirect() bounces them to /admin/login cleanly.
+    redirect("/admin/login");
+  }
 }
 
 export async function createAlbumAction(input: {

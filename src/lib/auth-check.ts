@@ -1,4 +1,5 @@
 import { getIronSession } from "iron-session";
+import { redirect } from "next/navigation";
 import {
   type AdminAuthResult,
   type AdminAuthOk,
@@ -121,7 +122,14 @@ export async function requireAdmin(): Promise<AdminAuthOk> {
     return { ok: true, userId: "test-admin", email: "test@local", role: "owner" };
   }
   const r = await requireAdminSessionFromCookies();
-  if (!r.ok) throw new Error("unauthorized");
+  if (!r.ok) {
+    // Server actions hitting this branch used to throw `Error("unauthorized")`,
+    // which Next masks in prod builds as a generic "Server Components render"
+    // toast — the operator was left staring at a useless message after their
+    // session quietly expired on an already-rendered page. redirect() is
+    // intercepted by Next and routed as a real navigation to the login page.
+    redirect("/admin/login");
+  }
   return r;
 }
 
