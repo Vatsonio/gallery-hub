@@ -46,7 +46,7 @@ This is the path that gives you "click → update".
 1. **Portainer → Stacks → Add stack → Git repository**
 2. Repository URL: `https://github.com/Vatsonio/gallery-hub`
 3. Repository reference: `refs/heads/master`
-4. Compose path: `docker-compose.prod.yml`
+4. Compose path: `deploy/portainer-stack.yml`
 5. **Authentication**: leave empty if the repo is public
 6. **Automatic updates**: enable, polling interval 5 minutes (or set up the
    webhook flow — see below)
@@ -114,6 +114,53 @@ Set "Automatic updates" → "GitOps updates" in the Portainer stack to poll
 the repo every N minutes. Portainer pulls images and redeploys when the
 compose file or its referenced tags change. Simplest, but lags behind a
 push by up to N minutes and re-runs even when only the README changed.
+
+### Option D — SSH (when Portainer's web UI lags or you want determinism)
+
+After the build workflow turns green, SSH to the Proxmox host (or the LXC
+that runs Docker) and:
+
+```sh
+# Force-pull the latest images — pull_policy: always in the stack makes
+# this redundant on `up`, but explicit pulls are handy when you want to
+# inspect the new SHAs before recreating.
+docker pull ghcr.io/vatsonio/gallery-hub:latest
+docker pull ghcr.io/vatsonio/gallery-hub-worker:latest
+
+# Recreate the three services that move on every release. Postgres /
+# MinIO / imgproxy / cloudflared / watchtower stay up.
+docker compose -p <portainer-stack-name> \
+  --env-file /path/to/stack.env \
+  -f deploy/portainer-stack.yml \
+  up -d --force-recreate gallery-migrate gallery-app gallery-worker
+
+# Confirm the new image is live and reporting the right commit:
+curl -sS https://gallery.example.com/api/health
+# → {"db":"ok","minio":"ok","uptime_s":...,"version":"sha-XXXXXXX..."}
+```
+
+If you don't know the stack project name, Portainer shows it under
+**Stacks → name** and `docker inspect gallery-app --format
+'{{index .Config.Labels "com.docker.compose.project"}}'` prints it from
+the running container.
+
+### One-off: orientation backfill after upgrading past `9a965b9`
+
+Commit `9a965b9` fixes a bug where iPhone portrait shots were stored
+with landscape dimensions (worker trusted `sharp.metadata()` over the
+EXIF Orientation tag). Existing rows need a one-shot correction. After
+the new worker image is running:
+
+```sh
+docker exec gallery-app npx tsx scripts/backfill-orientation.ts
+```
+
+The script walks every photo with `status='ready'`, re-reads sharp
+metadata against MinIO, and updates rows whose stored dimensions
+disagree with the orientation-corrected truth. Idempotent — safe to
+re-run. On the smoke album it caught 8 photos out of 223.
+
+Re-deployments after the backfill don't need to run it again.
 
 ## DNS + TLS
 
