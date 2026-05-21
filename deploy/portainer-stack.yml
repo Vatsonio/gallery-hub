@@ -96,7 +96,10 @@ services:
       IMGPROXY_URL: http://gallery-imgproxy:8080
       IMGPROXY_KEY: ${IMGPROXY_KEY}
       IMGPROXY_SALT: ${IMGPROXY_SALT}
-      APP_VERSION: prod
+      # APP_VERSION inherits the Dockerfile build-arg that CI bakes
+      # (sha-${{ github.sha }} from .github/workflows/build.yml). An
+      # explicit override here would beat that and force the admin
+      # sidebar to render a static literal instead of the real commit.
     depends_on:
       gallery-postgres:
         condition: service_healthy

@@ -92,7 +92,11 @@ services:
       IMGPROXY_URL: http://gallery-imgproxy:8080
       IMGPROXY_KEY: ${IMGPROXY_KEY}
       IMGPROXY_SALT: ${IMGPROXY_SALT}
-      APP_VERSION: smoke
+      # APP_VERSION inherits the Dockerfile build-arg. CI bakes
+      # sha-${{ github.sha }} into the image; local rebuilds should pass
+      # --build-arg APP_VERSION=sha-$(git rev-parse HEAD) so the admin
+      # sidebar shows the real commit instead of a literal "smoke".
+      # An explicit override here would beat the baked value at runtime.
     ports:
       - "3000:3000"
     depends_on:
