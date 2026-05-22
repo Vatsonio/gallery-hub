@@ -4,6 +4,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { requireAdminSession } from "@/lib/auth-check";
 import { s3Client, BUCKET, headObject } from "@/lib/minio";
 import { originalKey } from "@/lib/keys";
+import { getAlbumById, assertAdminAlbumAccess } from "@/lib/albums";
 import { sql } from "@/lib/db";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { validatePhotoEditPayload, brightnessToModulate, PhotoEditValidationError } from "@/lib/photo-edit";
@@ -44,17 +45,11 @@ async function discoverOriginal(albumId: string, photoId: string): Promise<{ ext
  * stable), then enqueues a derivative regeneration so every variant
  * picks up the change. Body shape is documented in src/lib/photo-edit.ts.
  *
- * F13 pentest finding (2026-05-16): we deliberately do NOT cross-check
- * `photo.album.admin_id === auth.userId` here. The `albums` schema
- * (migrations/002_albums.sql) has no `admin_id` column — this product is
- * SINGLE-ADMIN-BY-DESIGN. The single admin owns every album, so the
- * `requireAdminSession` gate above is sufficient.
- *
- * TODO(multi-admin): if a second admin is ever introduced, add an
- * `admin_id` column to `albums`, then enforce here:
- *   const album = await getAlbumById(photo.album_id);
- *   if (album.admin_id !== auth.userId) return 403;
- * — otherwise this becomes a horizontal-IDOR vector across admins.
+ * Ownership: the F13 pentest TODO (2026-05-16) was resolved by migration
+ * 021 which added `albums.owner_user_id`. We resolve the album from the
+ * photo and assert the caller can touch it. Owner role bypasses the
+ * ownership check; non-owner admins can only edit photos in their own
+ * workspace.
  */
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const auth = await requireAdminSession(req);
@@ -62,14 +57,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   if (!isSameOrigin(req)) {
     return NextResponse.json({ error: "forbidden origin" }, { status: 403 });
   }
-  // F13 SAFETY: see header comment — single-admin schema makes the
-  // `requireAdminSession` check above equivalent to an ownership check
-  // until the data model gains `albums.admin_id`.
 
   const { id: photoId } = await ctx.params;
   const rows = await sql<PhotoRow[]>`SELECT * FROM photos WHERE id = ${photoId} LIMIT 1`;
   const photo = rows[0];
   if (!photo) return NextResponse.json({ error: "photo not found" }, { status: 404 });
+
+  // Cross-workspace IDOR guard: surface 404 (not 403) so we don't leak
+  // existence of someone else's photo id.
+  const album = await getAlbumById(photo.album_id);
+  if (!album) return NextResponse.json({ error: "photo not found" }, { status: 404 });
+  try {
+    assertAdminAlbumAccess(album, { userId: auth.userId, role: auth.role });
+  } catch {
+    return NextResponse.json({ error: "photo not found" }, { status: 404 });
+  }
 
   let payload;
   try {

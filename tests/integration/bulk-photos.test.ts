@@ -4,6 +4,7 @@ import { sql } from "@/lib/db";
 import { s3Client, BUCKET, ensureBucket } from "@/lib/minio";
 import { setupTestDb, resetTestDb } from "./_helpers";
 import { createAlbum, insertPhoto, bulkDeletePhotos, bulkMovePhotos, setCover, getAlbumById, listPhotos } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { originalKey, variantKey } from "@/lib/keys";
 import { randomUUID } from "node:crypto";
 
@@ -41,7 +42,7 @@ beforeEach(async () => {
 
 describe.skipIf(dockerOff)("bulkDeletePhotos", () => {
   it("removes a batch of photos and clears cover if pointed at one", async () => {
-    const album = await createAlbum({ title: "BulkDel", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "BulkDel", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const ids = [randomUUID(), randomUUID(), randomUUID()];
     for (let i = 0; i < ids.length; i++) {
       await insertPhoto({
@@ -62,7 +63,7 @@ describe.skipIf(dockerOff)("bulkDeletePhotos", () => {
   });
 
   it("is a no-op on empty list", async () => {
-    const album = await createAlbum({ title: "Empty", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "Empty", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     await bulkDeletePhotos(album.id, []);
     const rows = await listPhotos(album.id);
     expect(rows).toHaveLength(0);
@@ -71,8 +72,8 @@ describe.skipIf(dockerOff)("bulkDeletePhotos", () => {
 
 describe.skipIf(dockerOff)("bulkMovePhotos", () => {
   it("moves photos and their MinIO objects between albums", async () => {
-    const src = await createAlbum({ title: "Src", subtitle: null, status: "draft" });
-    const dst = await createAlbum({ title: "Dst", subtitle: null, status: "draft" });
+    const src = await createAlbum({ title: "Src", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
+    const dst = await createAlbum({ title: "Dst", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const pid = randomUUID();
     await insertPhoto({
       id: pid, album_id: src.id, filename: "x.jpg",
@@ -110,7 +111,7 @@ describe.skipIf(dockerOff)("bulkMovePhotos", () => {
   }, 60_000);
 
   it("is a no-op when src == dst", async () => {
-    const a = await createAlbum({ title: "Same", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Same", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const pid = randomUUID();
     await insertPhoto({
       id: pid, album_id: a.id, filename: "y.jpg",
@@ -123,8 +124,8 @@ describe.skipIf(dockerOff)("bulkMovePhotos", () => {
   });
 
   it("clears stale cover on the source album when the cover moves", async () => {
-    const src = await createAlbum({ title: "SrcCov", subtitle: null, status: "draft" });
-    const dst = await createAlbum({ title: "DstCov", subtitle: null, status: "draft" });
+    const src = await createAlbum({ title: "SrcCov", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
+    const dst = await createAlbum({ title: "DstCov", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const pid = randomUUID();
     await insertPhoto({
       id: pid, album_id: src.id, filename: "c.jpg",

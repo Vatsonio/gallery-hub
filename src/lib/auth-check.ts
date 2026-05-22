@@ -8,6 +8,7 @@ import {
   sessionOptions,
 } from "@/lib/session";
 import { getUserById } from "@/lib/users";
+import { TEST_ADMIN_USER_ID, TEST_ADMIN_EMAIL } from "@/lib/test-admin";
 
 /**
  * Node-only auth checks. Lives in a separate module from `session.ts` so the
@@ -61,7 +62,7 @@ export function isOwner(r: AdminAuthResult): boolean {
  */
 export async function requireAdminSession(req: Request): Promise<AdminAuthResult> {
   if (process.env.NODE_ENV === "test" && req.headers.get("x-test-admin") === "1") {
-    return { ok: true, userId: "test-admin", email: "test@local", role: "owner" };
+    return { ok: true, userId: TEST_ADMIN_USER_ID, email: TEST_ADMIN_EMAIL, role: "owner" };
   }
   const cookieHeader = req.headers.get("cookie") ?? "";
   const parsed = new Map<string, string>();
@@ -119,7 +120,7 @@ export async function requireAdminSessionFromCookies(): Promise<AdminAuthResult>
 
 export async function requireAdmin(): Promise<AdminAuthOk> {
   if (process.env.GH_TEST_BYPASS_AUTH === "1") {
-    return { ok: true, userId: "test-admin", email: "test@local", role: "owner" };
+    return { ok: true, userId: TEST_ADMIN_USER_ID, email: TEST_ADMIN_EMAIL, role: "owner" };
   }
   const r = await requireAdminSessionFromCookies();
   if (!r.ok) {

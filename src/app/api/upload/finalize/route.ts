@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/auth-check";
-import { getAlbumById, insertPhotosBatch } from "@/lib/albums";
+import { getAlbumById, insertPhotosBatch, assertAdminAlbumAccess } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { originalKey } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
@@ -37,6 +37,11 @@ export async function POST(req: Request): Promise<Response> {
 
   const album = await getAlbumById(body.album_id);
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
+  try {
+    assertAdminAlbumAccess(album, { userId: auth.userId, role: auth.role });
+  } catch {
+    return NextResponse.json({ error: "album not found" }, { status: 404 });
+  }
 
   // F4: enforce settings.uploads.max_files_per_album against the live
   // count + the incoming batch. The presign cap blocks at presign time;

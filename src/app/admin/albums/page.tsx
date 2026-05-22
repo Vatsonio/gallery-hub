@@ -1,11 +1,13 @@
 import { listAlbumsWithStats } from "@/lib/albums";
+import { requireAdmin } from "@/lib/auth-check";
 import { AlbumCard } from "@/components/admin/AlbumCard";
 import { NewAlbumCard } from "@/components/admin/NewAlbumCard";
 
 export const dynamic = "force-dynamic";
 
 export default async function AlbumsPage() {
-  const albums = await listAlbumsWithStats();
+  const session = await requireAdmin();
+  const albums = await listAlbumsWithStats({ userId: session.userId, role: session.role });
   return (
     <div className="p-8">
       <header className="mb-8 flex items-baseline justify-between">

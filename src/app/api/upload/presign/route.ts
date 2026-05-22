@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { requireAdminSession } from "@/lib/auth-check";
-import { getAlbumById } from "@/lib/albums";
+import { getAlbumById, assertAdminAlbumAccess } from "@/lib/albums";
 import { presignPut } from "@/lib/presign";
 import { originalKey, extFromContentType } from "@/lib/keys";
 import { isSameOrigin } from "@/lib/same-origin";
@@ -45,6 +45,13 @@ export async function POST(req: Request): Promise<Response> {
 
   const album = await getAlbumById(body.album_id);
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
+  try {
+    assertAdminAlbumAccess(album, { userId: auth.userId, role: auth.role });
+  } catch {
+    // Cross-workspace upload attempt — surface 404 not 403 so we don't
+    // confirm the album id exists in someone else's namespace.
+    return NextResponse.json({ error: "album not found" }, { status: 404 });
+  }
 
   if (settings.storage.block_uploads_when_full) {
     const usage = await getStorageUsage();

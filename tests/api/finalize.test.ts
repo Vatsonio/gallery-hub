@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { POST } from "@/app/api/upload/finalize/route";
 import { createAlbum, listPhotos } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { runMigrations } from "@/../scripts/migrate";
 
@@ -15,11 +16,12 @@ function mockReq(body: unknown): Request {
 beforeAll(async () => {
   vi.stubEnv("NODE_ENV", "test");
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
 });
 
 describe("POST /api/upload/finalize", () => {
   it("inserts photos at status=processing and enqueues jobs", async () => {
-    const a = await createAlbum({ title: "Fin", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Fin", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const photo_id_1 = crypto.randomUUID();
     const photo_id_2 = crypto.randomUUID();
     const res = await POST(mockReq({

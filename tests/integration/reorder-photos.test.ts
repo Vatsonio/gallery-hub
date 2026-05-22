@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { setupTestDb, resetTestDb } from "./_helpers";
 import { createAlbum, insertPhoto, listPhotos, reorderPhotos } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { randomUUID } from "node:crypto";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -16,7 +17,7 @@ const dockerOff = process.env.SKIP_TESTCONTAINERS === "1";
 
 describe.skipIf(dockerOff)("reorderPhotos", () => {
   it("rewrites sort_order to match the supplied id sequence", async () => {
-    const album = await createAlbum({ title: "Reorder", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "Reorder", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
       const id = randomUUID();
@@ -36,7 +37,7 @@ describe.skipIf(dockerOff)("reorderPhotos", () => {
 
   it("reorderPhotosAction is gated and updates order", async () => {
     const { reorderPhotosAction } = await import("@/app/admin/albums/actions");
-    const album = await createAlbum({ title: "ReorderAct", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "ReorderAct", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
       const id = randomUUID();

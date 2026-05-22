@@ -23,7 +23,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   if (!auth.ok) return new NextResponse(null, { status: 401 });
 
   const { slug } = await ctx.params;
-  const album = await getAlbumBySlug(slug);
+  const album = await getAlbumBySlug(slug, { userId: auth.userId, role: auth.role });
   if (!album) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const photos = await listPhotos(album.id);

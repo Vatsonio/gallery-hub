@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { POST } from "@/app/api/upload/presign/route";
 import { createAlbum } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { sql } from "@/lib/db";
 import { runMigrations } from "@/../scripts/migrate";
 
@@ -17,13 +18,14 @@ function mockReq(body: unknown, authed = true): Request {
 beforeAll(async () => {
   vi.stubEnv("NODE_ENV", "test");
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
   await sql`DELETE FROM photos`;
   await sql`DELETE FROM albums`;
 });
 
 describe("POST /api/upload/presign", () => {
   it("returns presigned URLs and pre-allocated photo ids", async () => {
-    const album = await createAlbum({ title: "P", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "P", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const res = await POST(mockReq({
       album_id: album.id,
       files: [
@@ -41,7 +43,7 @@ describe("POST /api/upload/presign", () => {
   });
 
   it("400s on unsupported content-type", async () => {
-    const album = await createAlbum({ title: "P2", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "P2", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const res = await POST(mockReq({
       album_id: album.id,
       files: [{ filename: "x.pdf", size: 10, contentType: "application/pdf" }],

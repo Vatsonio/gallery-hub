@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { s3Client, BUCKET, ensureBucket } from "@/lib/minio";
 import { setupTestDb, resetTestDb } from "./_helpers";
 import { createAlbum, insertPhoto } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { originalKey } from "@/lib/keys";
 import { POST } from "@/app/api/photos/[id]/edit/route";
 import { getBoss } from "@/lib/jobs";
@@ -51,7 +52,7 @@ async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
 
 describe.skipIf(dockerOff)("POST /api/photos/[id]/edit", () => {
   it("rotates the original and marks the photo as processing", async () => {
-    const album = await createAlbum({ title: "EditTest", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "EditTest", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const photoId = randomUUID();
     await insertPhoto({
       id: photoId, album_id: album.id, filename: "p.jpg",
@@ -90,7 +91,7 @@ describe.skipIf(dockerOff)("POST /api/photos/[id]/edit", () => {
   }, 60_000);
 
   it("rejects invalid payloads with 400", async () => {
-    const album = await createAlbum({ title: "Bad", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "Bad", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const photoId = randomUUID();
     await insertPhoto({
       id: photoId, album_id: album.id, filename: "p.jpg",

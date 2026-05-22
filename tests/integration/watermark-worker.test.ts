@@ -3,6 +3,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET, ensureBucket } from "@/lib/minio";
 import { setupTestDb, resetTestDb } from "./_helpers";
 import { createAlbum, insertPhoto, updateAlbum } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { originalKey } from "@/lib/keys";
 import { handleGenerateDerivatives } from "../../workers/generateDerivatives";
 import { createSampleJpeg } from "../fixtures/createSampleJpeg";
@@ -33,8 +34,8 @@ describe.skipIf(dockerOff)("derivative worker — watermark integration (imgprox
       // now only owns metadata (status, dimensions, taken_at, thumbhash),
       // so the assertion here is: the worker tolerates either flag without
       // touching pixels.
-      const albumOn = await createAlbum({ title: "WM_ON", subtitle: null, status: "draft" });
-      const albumOff = await createAlbum({ title: "WM_OFF", subtitle: null, status: "draft" });
+      const albumOn = await createAlbum({ title: "WM_ON", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
+      const albumOff = await createAlbum({ title: "WM_OFF", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
       await updateAlbum(albumOn.id, { watermarkEnabled: true, watermarkText: "TEST STAMP" });
 
       const buf = await createSampleJpeg(1200, 800);

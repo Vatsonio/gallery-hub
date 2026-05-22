@@ -6,6 +6,22 @@ import { requireAdmin } from "@/lib/auth-check";
 import { hashPassword } from "@/lib/passwords";
 import { loadSettings } from "@/lib/settings";
 import { revalidatePath } from "next/cache";
+import { getAlbumById, assertAdminAlbumAccess } from "@/lib/albums";
+
+/**
+ * Resolve the album behind a share token and assert the calling admin
+ * has access. Used by update/revoke flows which only know the token.
+ */
+async function assertCallerOwnsShareToken(token: string, viewer: { userId: string; role: "owner" | "admin" }): Promise<void> {
+  const rows = await sql<{ album_id: string }[]>`
+    SELECT album_id FROM share_links WHERE token = ${token} LIMIT 1
+  `;
+  const albumId = rows[0]?.album_id;
+  if (!albumId) throw new Error("share link not found");
+  const album = await getAlbumById(albumId);
+  if (!album) throw new Error("share link not found");
+  assertAdminAlbumAccess(album, viewer);
+}
 
 // F5: the /a/[token] page is ISR-cached for `revalidate = 60`. Without
 // explicit invalidation, a share-link revocation / password add / photo
@@ -37,7 +53,12 @@ export interface UpdateShareLinkInput {
 }
 
 export async function createShareLink(albumId: string, input: CreateShareLinkInput): Promise<ShareLinkRow> {
-  await requireAdmin();
+  const session = await requireAdmin();
+  // Cross-workspace IDOR guard — non-owner admin can't mint a share
+  // link for another admin's album just by guessing the UUID.
+  const album = await getAlbumById(albumId);
+  if (!album) throw new Error("album not found");
+  assertAdminAlbumAccess(album, { userId: session.userId, role: session.role });
   // F4: fall back to settings.share_links.default_* when the caller
   // omits a field. The previous code hard-defaulted to "no expiry,
   // download on, no password" regardless of operator settings.
@@ -73,7 +94,8 @@ export async function createShareLink(albumId: string, input: CreateShareLinkInp
 }
 
 export async function updateShareLink(token: string, input: UpdateShareLinkInput): Promise<ShareLinkRow> {
-  await requireAdmin();
+  const session = await requireAdmin();
+  await assertCallerOwnsShareToken(token, { userId: session.userId, role: session.role });
   let newPasswordHash: string | null | undefined = undefined;
   if (input.newPassword === null) newPasswordHash = null;
   else if (typeof input.newPassword === "string") newPasswordHash = await hashPassword(input.newPassword);
@@ -93,7 +115,8 @@ export async function updateShareLink(token: string, input: UpdateShareLinkInput
 }
 
 export async function revokeShareLink(token: string): Promise<void> {
-  await requireAdmin();
+  const session = await requireAdmin();
+  await assertCallerOwnsShareToken(token, { userId: session.userId, role: session.role });
   await sql`DELETE FROM share_links WHERE token = ${token}`;
   revalidatePath(`/admin/albums`);
   revalidatePath(`/a/${token}`);

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { setupTestDb, resetTestDb } from "./_helpers";
 import { sql } from "@/lib/db";
 import { createAlbum, insertPhoto, getAlbumById } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { randomUUID } from "node:crypto";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -18,7 +19,7 @@ const dockerOff = process.env.SKIP_TESTCONTAINERS === "1";
 describe.skipIf(dockerOff)("cover picker server flow", () => {
   it("setCoverAction persists cover_photo_id on the album", async () => {
     const { setCoverAction } = await import("@/app/admin/albums/actions");
-    const album = await createAlbum({ title: "CoverTest", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "CoverTest", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const pid = randomUUID();
     await insertPhoto({
       id: pid, album_id: album.id, filename: "c.jpg",
@@ -34,7 +35,7 @@ describe.skipIf(dockerOff)("cover picker server flow", () => {
 
   it("can switch cover from one photo to another", async () => {
     const { setCoverAction } = await import("@/app/admin/albums/actions");
-    const album = await createAlbum({ title: "Switch", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "Switch", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const p1 = randomUUID();
     const p2 = randomUUID();
     for (const pid of [p1, p2]) {

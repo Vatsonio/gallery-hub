@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "@/app/api/admin/albums/[slug]/warm/route";
 import { createAlbum, insertPhoto } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { runMigrations } from "@/../scripts/migrate";
 import { __resetImgproxyContextForTests } from "@/lib/imgproxy";
 
@@ -23,6 +24,7 @@ function mockReq(): Request {
 beforeAll(async () => {
   vi.stubEnv("NODE_ENV", "test");
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
 });
 
 beforeEach(() => {
@@ -52,7 +54,7 @@ describe("POST /api/admin/albums/[slug]/warm", () => {
   });
 
   it("returns {warmed: N, total: N} after hitting imgproxy for every photo", async () => {
-    const a = await createAlbum({ title: "Warm", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Warm", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     for (let i = 0; i < 3; i++) {
       await insertPhoto({
         id: crypto.randomUUID(),
@@ -88,7 +90,7 @@ describe("POST /api/admin/albums/[slug]/warm", () => {
   it("returns {warmed:0,total:0} with skipped flag when imgproxy is disabled", async () => {
     delete process.env.PUBLIC_IMGPROXY_URL;
     __resetImgproxyContextForTests();
-    const a = await createAlbum({ title: "Disabled", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Disabled", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     await insertPhoto({
       id: crypto.randomUUID(),
       album_id: a.id,
@@ -106,7 +108,7 @@ describe("POST /api/admin/albums/[slug]/warm", () => {
   });
 
   it("returns 401 when admin auth is missing", async () => {
-    const a = await createAlbum({ title: "Auth", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Auth", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const req = new Request("http://t/api/admin/albums/x/warm", {
       method: "POST",
       headers: { origin: "http://t", host: "t" },

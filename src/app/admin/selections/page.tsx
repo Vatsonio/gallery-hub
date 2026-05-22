@@ -21,7 +21,10 @@ interface SelectionRow {
  * ordered by recency. Admin-only.
  */
 export default async function SelectionsPage() {
-  await requireAdmin();
+  const session = await requireAdmin();
+  // Workspace scoping: non-owner admins only see selections on their own
+  // albums; owner role sees everyone's.
+  const isOwner = session.role === "owner";
   const rows = await sql<SelectionRow[]>`
     SELECT
       f.share_token,
@@ -36,6 +39,7 @@ export default async function SelectionsPage() {
     JOIN albums a ON a.id = sl.album_id
     WHERE a.deleted_at IS NULL
       AND f.viewer_id <> ${ADMIN_PREVIEW_VIEWER_ID}
+      AND (${isOwner} OR a.owner_user_id = ${session.userId})
     GROUP BY f.share_token, a.id, a.title, a.slug, f.viewer_id
     ORDER BY MAX(f.created_at) DESC
     LIMIT 100

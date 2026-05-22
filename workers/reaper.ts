@@ -20,7 +20,11 @@ async function deletePrefix(prefix: string): Promise<void> {
 }
 
 export async function handleReap(): Promise<void> {
-  const ids = await listSoftDeletedAlbumIds();
+  // System worker — no admin in the loop. The owner-role branch of
+  // listSoftDeletedAlbumIds returns rows across every workspace, which
+  // is what we want here (sweep all admins' deleted albums). userId is
+  // ignored on the owner path.
+  const ids = await listSoftDeletedAlbumIds({ userId: "system", role: "owner" });
   for (const id of ids) {
     await deletePrefix(`albums/${id}/`);
     await hardDeleteAlbum(id);

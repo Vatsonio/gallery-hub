@@ -25,11 +25,11 @@ export default async function SelectionsAlbumPage({
   params,
   searchParams,
 }: Props) {
-  await requireAdmin();
+  const session = await requireAdmin();
   const { albumSlug } = await params;
   const { viewer } = await searchParams;
 
-  const album = await getAlbumBySlug(albumSlug);
+  const album = await getAlbumBySlug(albumSlug, { userId: session.userId, role: session.role });
   if (!album) notFound();
 
   // Find a share link for this album (there may be many; we just need

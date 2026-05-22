@@ -8,6 +8,23 @@ import { s3Client, BUCKET, deleteObjectsByPrefix, deleteObject } from "@/lib/min
 import { watermarkKey } from "@/lib/watermarks";
 import type { AlbumRow, AlbumStatus, AlbumWithStats, PhotoExif, PhotoRow } from "@/lib/types";
 
+/**
+ * Visibility scope for album queries from the admin surface. Public-side
+ * code that has its own auth model (share-tokens) keeps using the
+ * unscoped `getAlbumById` — it's already gated upstream.
+ *
+ *   - role: "owner" sees every admin's albums (the global "superuser"
+ *     view kept for support / catalog inspection).
+ *   - role: "admin" sees only albums where owner_user_id = userId.
+ *
+ * Callers always derive this from `requireAdmin()` which guarantees a
+ * fresh DB-backed role lookup.
+ */
+export interface AdminViewer {
+  userId: string;
+  role: "owner" | "admin";
+}
+
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -18,11 +35,14 @@ function slugify(input: string): string {
     .slice(0, 60);
 }
 
-async function uniqueSlug(base: string): Promise<string> {
+async function uniqueSlugForOwner(base: string, ownerUserId: string): Promise<string> {
   const root = slugify(base) || "album";
   for (let i = 0; i < 20; i++) {
     const candidate = i === 0 ? root : `${root}-${i + 1}`;
-    const rows = await sql`SELECT 1 FROM albums WHERE slug = ${candidate} LIMIT 1`;
+    const rows = await sql`
+      SELECT 1 FROM albums
+       WHERE slug = ${candidate} AND owner_user_id = ${ownerUserId}
+       LIMIT 1`;
     if (rows.length === 0) return candidate;
   }
   return `${root}-${randomUUID().slice(0, 6)}`;
@@ -32,33 +52,81 @@ export interface CreateAlbumInput {
   title: string;
   subtitle: string | null;
   status: AlbumStatus;
+  /** Admin user who owns the album. Required since the workspace split. */
+  ownerUserId: string;
 }
 
 export async function createAlbum(input: CreateAlbumInput): Promise<AlbumRow> {
   const id = randomUUID();
-  const slug = await uniqueSlug(input.title);
+  const slug = await uniqueSlugForOwner(input.title, input.ownerUserId);
   const rows = await sql<AlbumRow[]>`
-    INSERT INTO albums (id, slug, title, subtitle, status)
-    VALUES (${id}, ${slug}, ${input.title}, ${input.subtitle}, ${input.status})
+    INSERT INTO albums (id, slug, title, subtitle, status, owner_user_id)
+    VALUES (${id}, ${slug}, ${input.title}, ${input.subtitle}, ${input.status}, ${input.ownerUserId})
     RETURNING *`;
   return rows[0];
 }
 
-export async function getAlbumBySlug(slug: string): Promise<AlbumRow | null> {
+/**
+ * Resolve an album by its slug for the given admin viewer. Slugs are
+ * unique only within an owner's namespace, so:
+ *
+ *   - role "admin": match slug AND owner_user_id = viewer.userId
+ *   - role "owner": match slug anywhere (any non-owner could in theory
+ *     have the same slug, so this picks the first match by updated_at).
+ *     In practice the owner is the single backfill recipient + creates
+ *     albums under their own owner_user_id, so collisions are rare.
+ *
+ * Public/share routes don't call this — they go through getAlbumById.
+ */
+export async function getAlbumBySlug(slug: string, viewer: AdminViewer): Promise<AlbumRow | null> {
+  if (viewer.role === "owner") {
+    const rows = await sql<AlbumRow[]>`
+      SELECT * FROM albums
+       WHERE slug = ${slug} AND deleted_at IS NULL
+       ORDER BY updated_at DESC
+       LIMIT 1`;
+    return rows[0] ?? null;
+  }
   const rows = await sql<AlbumRow[]>`
-    SELECT * FROM albums WHERE slug = ${slug} AND deleted_at IS NULL LIMIT 1`;
+    SELECT * FROM albums
+     WHERE slug = ${slug}
+       AND owner_user_id = ${viewer.userId}
+       AND deleted_at IS NULL
+     LIMIT 1`;
   return rows[0] ?? null;
 }
 
+/**
+ * Unscoped lookup — used by public/share flows that have their own
+ * auth (share token / unlock cookie). Admin callers MUST verify
+ * ownership via `assertAdminAlbumAccess` after fetching.
+ */
 export async function getAlbumById(id: string): Promise<AlbumRow | null> {
   const rows = await sql<AlbumRow[]>`
     SELECT * FROM albums WHERE id = ${id} AND deleted_at IS NULL LIMIT 1`;
   return rows[0] ?? null;
 }
 
-export async function listAlbums(): Promise<AlbumRow[]> {
+/**
+ * Throws if the given admin viewer is neither the owner of the album nor
+ * the global "owner" role. Use in admin mutation paths immediately after
+ * `getAlbumById` to gate cross-workspace access.
+ */
+export function assertAdminAlbumAccess(album: AlbumRow, viewer: AdminViewer): void {
+  if (viewer.role === "owner") return;
+  if (album.owner_user_id === viewer.userId) return;
+  throw new Error("forbidden: album belongs to a different workspace");
+}
+
+export async function listAlbums(viewer: AdminViewer): Promise<AlbumRow[]> {
+  if (viewer.role === "owner") {
+    return sql<AlbumRow[]>`
+      SELECT * FROM albums WHERE deleted_at IS NULL ORDER BY updated_at DESC`;
+  }
   return sql<AlbumRow[]>`
-    SELECT * FROM albums WHERE deleted_at IS NULL ORDER BY updated_at DESC`;
+    SELECT * FROM albums
+     WHERE owner_user_id = ${viewer.userId} AND deleted_at IS NULL
+     ORDER BY updated_at DESC`;
 }
 
 export interface UpdateAlbumInput {
@@ -96,9 +164,15 @@ export async function softDeleteAlbum(id: string): Promise<void> {
   await sql`UPDATE albums SET deleted_at = now() WHERE id = ${id}`;
 }
 
-export async function listSoftDeletedAlbumIds(): Promise<string[]> {
+export async function listSoftDeletedAlbumIds(viewer: AdminViewer): Promise<string[]> {
+  if (viewer.role === "owner") {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM albums WHERE deleted_at IS NOT NULL`;
+    return rows.map((r) => r.id);
+  }
   const rows = await sql<{ id: string }[]>`
-    SELECT id FROM albums WHERE deleted_at IS NOT NULL`;
+    SELECT id FROM albums
+     WHERE deleted_at IS NOT NULL AND owner_user_id = ${viewer.userId}`;
   return rows.map((r) => r.id);
 }
 
@@ -156,13 +230,13 @@ export async function purgeAlbumStorage(albumId: string): Promise<PurgeResult> {
  * aggregate result so the caller can surface "freed X MB across Y albums"
  * after a one-click trash purge from /admin/settings.
  */
-export async function purgeSoftDeletedAlbums(): Promise<{
+export async function purgeSoftDeletedAlbums(viewer: AdminViewer): Promise<{
   albumsPurged: number;
   totalBytesFreed: number;
   totalPhotosDeleted: number;
   totalS3ObjectsDeleted: number;
 }> {
-  const ids = await listSoftDeletedAlbumIds();
+  const ids = await listSoftDeletedAlbumIds(viewer);
   let totalBytesFreed = 0;
   let totalPhotosDeleted = 0;
   let totalS3ObjectsDeleted = 0;
@@ -522,14 +596,22 @@ export async function writePhotoVariantSizes(photoId: string, sizes: VariantSize
   `;
 }
 
-export async function listAlbumsWithStats(): Promise<AlbumWithStats[]> {
-  const rows = await sql<(AlbumRow & { photo_count: number })[]>`
-    SELECT a.*, COALESCE(p.cnt, 0)::int AS photo_count
-    FROM albums a
-    LEFT JOIN (SELECT album_id, COUNT(*)::int AS cnt FROM photos GROUP BY album_id) p
-      ON p.album_id = a.id
-    WHERE a.deleted_at IS NULL
-    ORDER BY a.updated_at DESC`;
+export async function listAlbumsWithStats(viewer: AdminViewer): Promise<AlbumWithStats[]> {
+  const rows = viewer.role === "owner"
+    ? await sql<(AlbumRow & { photo_count: number })[]>`
+        SELECT a.*, COALESCE(p.cnt, 0)::int AS photo_count
+        FROM albums a
+        LEFT JOIN (SELECT album_id, COUNT(*)::int AS cnt FROM photos GROUP BY album_id) p
+          ON p.album_id = a.id
+        WHERE a.deleted_at IS NULL
+        ORDER BY a.updated_at DESC`
+    : await sql<(AlbumRow & { photo_count: number })[]>`
+        SELECT a.*, COALESCE(p.cnt, 0)::int AS photo_count
+        FROM albums a
+        LEFT JOIN (SELECT album_id, COUNT(*)::int AS cnt FROM photos GROUP BY album_id) p
+          ON p.album_id = a.id
+        WHERE a.deleted_at IS NULL AND a.owner_user_id = ${viewer.userId}
+        ORDER BY a.updated_at DESC`;
   // Cover thumbs now resolve through imgproxy. We need the cover photo's
   // filename (for ext recovery) + updated_at (for cache-bust) — pulled in
   // one batch lookup so the album list stays O(1) DB round-trips.

@@ -2,10 +2,15 @@ import { sql } from '@/lib/db';
 import { generateShareToken } from '@/lib/share';
 import { randomUUID } from 'node:crypto';
 import { runMigrations } from '../../scripts/migrate';
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from '@/lib/test-admin';
 
 export async function setupTestDb(): Promise<void> {
   process.env.SESSION_PASSWORD ??= 'test-secret-test-secret-test-secret-1';
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  // Migration 021 added albums.owner_user_id NOT NULL. Tests that bypass
+  // auth still need a real admin_users row for the FK. resetTestDb does
+  // NOT truncate admin_users so this insert survives across tests.
+  await ensureTestAdminUser();
 }
 
 export async function teardownTestDb(): Promise<void> {
@@ -29,8 +34,8 @@ export async function seedAlbumWithPhotos(opts: {
 }): Promise<{ albumId: string; token: string; photoIds: string[] }> {
   const albumId = randomUUID();
   await sql`
-    INSERT INTO albums (id, slug, title, status)
-    VALUES (${albumId}, ${'a-' + albumId.slice(0, 8)}, 'Test Album', 'published')
+    INSERT INTO albums (id, slug, title, status, owner_user_id)
+    VALUES (${albumId}, ${'a-' + albumId.slice(0, 8)}, 'Test Album', 'published', ${TEST_ADMIN_USER_ID})
   `;
   const photoIds: string[] = [];
   for (let i = 0; i < opts.count; i++) {

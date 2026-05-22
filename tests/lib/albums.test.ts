@@ -5,31 +5,33 @@ import {
   softDeleteAlbum, listPhotos, insertPhoto, insertPhotosBatch, setCover,
   reorderPhotos, deletePhoto, markPhotoReady
 } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { runMigrations } from "@/../scripts/migrate";
 
 beforeAll(async () => {
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
   await sql`DELETE FROM photos`;
   await sql`DELETE FROM albums`;
 });
 
 describe("albums repo", () => {
   it("creates and reads an album", async () => {
-    const a = await createAlbum({ title: "Anna & Oleh", subtitle: "Wedding", status: "draft" });
+    const a = await createAlbum({ title: "Anna & Oleh", subtitle: "Wedding", status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     expect(a.slug).toMatch(/^anna-oleh/);
-    const got = await getAlbumBySlug(a.slug);
+    const got = await getAlbumBySlug(a.slug, { userId: TEST_ADMIN_USER_ID, role: "owner" });
     expect(got?.id).toBe(a.id);
   });
 
   it("lists albums excluding soft-deleted", async () => {
-    const a = await createAlbum({ title: "ToDelete", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "ToDelete", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     await softDeleteAlbum(a.id);
-    const all = await listAlbums();
+    const all = await listAlbums({ userId: TEST_ADMIN_USER_ID, role: "owner" });
     expect(all.find((x) => x.id === a.id)).toBeUndefined();
   });
 
   it("inserts photo with status processing, lists, updates, reorders", async () => {
-    const a = await createAlbum({ title: "Photos", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Photos", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const p1 = await insertPhoto({ id: crypto.randomUUID(), album_id: a.id, filename: "a.jpg", width: 100, height: 80, orig_bytes: 1234, taken_at: null });
     const p2 = await insertPhoto({ id: crypto.randomUUID(), album_id: a.id, filename: "b.jpg", width: 100, height: 80, orig_bytes: 1234, taken_at: null });
     const photos = await listPhotos(a.id);
@@ -37,7 +39,7 @@ describe("albums repo", () => {
     expect(photos[0].status).toBe("processing");
 
     await setCover(a.id, p2.id);
-    const a2 = await getAlbumBySlug(a.slug);
+    const a2 = await getAlbumBySlug(a.slug, { userId: TEST_ADMIN_USER_ID, role: "owner" });
     expect(a2?.cover_photo_id).toBe(p2.id);
 
     await reorderPhotos(a.id, [p2.id, p1.id]);
@@ -54,7 +56,7 @@ describe("albums repo", () => {
   });
 
   it("insertPhotosBatch writes N rows in one round-trip with monotonic sort_order", async () => {
-    const a = await createAlbum({ title: "Batch", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "Batch", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     // Pre-seed one photo so we can verify base = MAX(sort_order)+1.
     const seed = await insertPhoto({
       id: crypto.randomUUID(),

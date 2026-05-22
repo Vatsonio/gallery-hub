@@ -4,6 +4,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET, ensureBucket } from "@/lib/minio";
 import { handleGenerateDerivatives } from "../../workers/generateDerivatives";
 import { createAlbum, insertPhoto, listPhotos } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { originalKey, variantKey, avifVariantKey } from "@/lib/keys";
 import { createSampleJpeg } from "../fixtures/createSampleJpeg";
 import { runMigrations } from "../../scripts/migrate";
@@ -20,6 +21,7 @@ async function objectExists(key: string): Promise<boolean> {
 beforeAll(async () => {
   if (process.env.SKIP_TESTCONTAINERS === "1") return;
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
   await ensureBucket();
 }, 120_000);
 
@@ -30,7 +32,8 @@ describe("handleGenerateDerivatives (imgproxy era)", () => {
       const album = await createAlbum({
         title: "Worker Test",
         subtitle: null,
-        status: "draft"
+        status: "draft",
+        ownerUserId: TEST_ADMIN_USER_ID,
       });
       const photoId = randomUUID();
       await insertPhoto({

@@ -10,6 +10,8 @@ import {
   deletePhotoStorage,
   listPhotoIdsForRegeneration, getAlbumById,
   listAlbums,
+  assertAdminAlbumAccess,
+  type AdminViewer,
 } from "@/lib/albums";
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { revalidateShareLink } from "@/lib/shareLoader";
@@ -47,11 +49,23 @@ async function revalidateAlbumTokensForMany(albumIds: string[]): Promise<void> {
   }
 }
 
-async function gate(): Promise<void> {
+/**
+ * Resolve the calling admin's identity AND redirect to login when the
+ * session lapsed. Used to be a void-returning `gate()` — every mutation
+ * below now needs the viewer to scope album access, so we return the
+ * AdminViewer instead.
+ */
+async function gate(): Promise<AdminViewer> {
   // Test harness bypass: integration tests run server actions directly
   // without an iron-session cookie. Honour the same env flag the
   // requireAdmin() helper uses for its DB-bound call sites.
-  if (process.env.GH_TEST_BYPASS_AUTH === "1") return;
+  if (process.env.GH_TEST_BYPASS_AUTH === "1") {
+    // Tests / bench scripts that flip this env flag bypass the iron-session
+    // check; the test-admin user row must exist (ensureTestAdminUser) so
+    // its UUID resolves through the new owner_user_id FK.
+    const { TEST_ADMIN_USER_ID } = await import("@/lib/test-admin");
+    return { userId: TEST_ADMIN_USER_ID, role: "owner" };
+  }
   const auth = await requireAdminSessionFromCookies();
   if (!auth.ok) {
     // Used to `throw new Error("unauthorized")`. In prod Next masks the
@@ -60,13 +74,49 @@ async function gate(): Promise<void> {
     // mid-edit. redirect() bounces them to /admin/login cleanly.
     redirect("/admin/login");
   }
+  return { userId: auth.userId, role: auth.role };
+}
+
+/**
+ * Look up the album AND verify the calling viewer is allowed to touch
+ * it. Throws if the album doesn't exist OR belongs to a different
+ * admin's workspace (owner role bypasses the ownership check).
+ */
+async function gateAlbum(albumId: string): Promise<AdminViewer> {
+  const viewer = await gate();
+  const album = await getAlbumById(albumId);
+  if (!album) throw new Error("album not found");
+  assertAdminAlbumAccess(album, viewer);
+  return viewer;
+}
+
+/**
+ * Variant of gateAlbum that resolves the album by its photo. Used by
+ * single-photo mutation actions (deletePhotoAction etc.) that only know
+ * the photoId. Throws if the photo doesn't exist or belongs to an album
+ * outside the viewer's workspace.
+ */
+async function gatePhoto(photoId: string): Promise<{ viewer: AdminViewer; albumId: string }> {
+  const viewer = await gate();
+  const rows = await sql<{ album_id: string }[]>`
+    SELECT album_id FROM photos WHERE id = ${photoId} LIMIT 1
+  `;
+  const albumId = rows[0]?.album_id;
+  if (!albumId) throw new Error("photo not found");
+  const album = await getAlbumById(albumId);
+  if (!album) throw new Error("album not found");
+  assertAdminAlbumAccess(album, viewer);
+  return { viewer, albumId };
 }
 
 export async function createAlbumAction(input: {
   title: string; subtitle: string | null; status: AlbumStatus;
 }): Promise<string> {
-  await gate();
-  const a = await createAlbum(input);
+  const viewer = await gate();
+  // New album always belongs to the caller's workspace. The owner role
+  // creates albums under their own user_id (not a magic "owner" bucket),
+  // so a future role swap doesn't silently re-home their content.
+  const a = await createAlbum({ ...input, ownerUserId: viewer.userId });
   revalidatePath("/admin/albums");
   return a.slug;
 }
@@ -74,14 +124,14 @@ export async function createAlbumAction(input: {
 export async function updateAlbumAction(id: string, patch: {
   title?: string; subtitle?: string | null; status?: AlbumStatus;
 }): Promise<void> {
-  await gate();
+  await gateAlbum(id);
   await updateAlbum(id, patch);
   revalidatePath("/admin/albums");
   await revalidateAlbumTokens(id);
 }
 
 export async function softDeleteAlbumAction(id: string): Promise<void> {
-  await gate();
+  await gateAlbum(id);
   // "Soft delete" is now immediate purge — MinIO objects + DB rows go away
   // together so the photographer's storage quota reflects reality. The
   // name is kept for back-compat with the AlbumForm client component.
@@ -105,8 +155,8 @@ export async function purgeSoftDeletedAlbumsAction(): Promise<{
   totalPhotosDeleted: number;
   totalS3ObjectsDeleted: number;
 }> {
-  await gate();
-  const r = await purgeSoftDeletedAlbums();
+  const viewer = await gate();
+  const r = await purgeSoftDeletedAlbums(viewer);
   revalidatePath("/admin/albums");
   revalidatePath("/admin/settings");
   revalidatePath("/admin/metrics");
@@ -114,14 +164,14 @@ export async function purgeSoftDeletedAlbumsAction(): Promise<{
 }
 
 export async function setCoverAction(albumId: string, photoId: string): Promise<void> {
-  await gate();
+  await gateAlbum(albumId);
   await setCover(albumId, photoId);
   revalidatePath("/admin/albums");
   await revalidateAlbumTokens(albumId);
 }
 
 export async function reorderPhotosAction(albumId: string, orderedIds: string[]): Promise<void> {
-  await gate();
+  await gateAlbum(albumId);
   await reorderPhotos(albumId, orderedIds);
   await revalidateAlbumTokens(albumId);
 }
@@ -135,7 +185,7 @@ export async function reorderPhotosAction(albumId: string, orderedIds: string[])
  * (burst-mode shots often share the same second).
  */
 export async function reorderPhotosByDateAction(albumId: string): Promise<void> {
-  await gate();
+  await gateAlbum(albumId);
   const rows = await sql<{ id: string }[]>`
     SELECT id FROM photos
      WHERE album_id = ${albumId}
@@ -148,20 +198,14 @@ export async function reorderPhotosByDateAction(albumId: string): Promise<void> 
 }
 
 export async function deletePhotoAction(photoId: string): Promise<void> {
-  await gate();
-  const rows = await sql<{ album_id: string }[]>`
-    SELECT album_id FROM photos WHERE id = ${photoId} LIMIT 1
-  `;
-  const albumId = rows[0]?.album_id;
+  const { albumId } = await gatePhoto(photoId);
   await deletePhoto(photoId);
-  if (albumId) {
-    await deletePhotoStorage(albumId, [photoId]);
-    await revalidateAlbumTokens(albumId);
-  }
+  await deletePhotoStorage(albumId, [photoId]);
+  await revalidateAlbumTokens(albumId);
 }
 
 export async function bulkDeletePhotosAction(albumId: string, photoIds: string[]): Promise<void> {
-  await gate();
+  await gateAlbum(albumId);
   await bulkDeletePhotos(albumId, photoIds);
   await deletePhotoStorage(albumId, photoIds);
   revalidatePath("/admin/albums");
@@ -173,7 +217,9 @@ export async function bulkMovePhotosAction(
   dstAlbumId: string,
   photoIds: string[],
 ): Promise<void> {
-  await gate();
+  // Caller must own BOTH ends of the move. Owner role bypasses both.
+  await gateAlbum(srcAlbumId);
+  await gateAlbum(dstAlbumId);
   await bulkMovePhotos(srcAlbumId, dstAlbumId, photoIds);
   revalidatePath("/admin/albums");
   await revalidateAlbumTokensForMany([srcAlbumId, dstAlbumId]);
@@ -187,8 +233,8 @@ export interface AlbumSummary {
 
 /** Returns the album list (id, title, slug) for the "Move to..." picker. */
 export async function listAlbumsForPickerAction(): Promise<AlbumSummary[]> {
-  await gate();
-  const rows = await listAlbums();
+  const viewer = await gate();
+  const rows = await listAlbums(viewer);
   return rows.map((a) => ({ id: a.id, title: a.title, slug: a.slug }));
 }
 
@@ -197,7 +243,7 @@ export async function updateAlbumWatermarkAction(
   enabled: boolean,
   text: string | null,
 ): Promise<void> {
-  await gate();
+  await gateAlbum(albumId);
   await updateAlbum(albumId, { watermarkEnabled: enabled, watermarkText: text });
   // imgproxy era: composition happens lazily at request time via the
   // wm_url processing step. We just need the watermark PNG to exist at
@@ -228,7 +274,7 @@ export async function updateAlbumWatermarkAction(
  * worker so width/height/thumbhash get re-read if the originals shifted.
  */
 export async function regenerateAlbumDerivativesAction(albumId: string): Promise<{ enqueued: number }> {
-  await gate();
+  await gateAlbum(albumId);
   const album = await getAlbumById(albumId);
   if (!album) throw new Error("album not found");
   const photos = await listPhotoIdsForRegeneration(albumId);

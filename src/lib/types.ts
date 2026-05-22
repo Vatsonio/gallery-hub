@@ -95,6 +95,9 @@ export interface AlbumRow {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  /** Admin user who owns this album. Non-owner admins only see rows where
+   *  this matches their userId; `role: "owner"` sees all. Added in 021. */
+  owner_user_id: string;
   /** When true, `web` + `large` variants are stamped on derivative generation. */
   watermark_enabled?: boolean;
   /** Wordmark text rendered onto the watermarked variants. Falls back to a default. */

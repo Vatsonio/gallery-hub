@@ -43,7 +43,7 @@ export async function POST(req: Request, ctx: Params): Promise<Response> {
   }
 
   const { slug } = await ctx.params;
-  const album = await getAlbumBySlug(slug);
+  const album = await getAlbumBySlug(slug, { userId: auth.userId, role: auth.role });
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
 
   if (!isImgproxyEnabled()) {

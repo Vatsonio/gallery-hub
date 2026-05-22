@@ -85,12 +85,15 @@ function Banner({
 export default async function SettingsPage({
   searchParams,
 }: PageProps): Promise<React.JSX.Element> {
-  await requireOwner();
+  const session = await requireOwner();
   const sp = await searchParams;
   const [settings, usage, trashedIds] = await Promise.all([
     loadSettings(),
     getStorageUsage(),
-    listSoftDeletedAlbumIds(),
+    // /admin/settings is owner-only so we always pass the owner viewer —
+    // surface every workspace's trash so the global purge button is
+    // accurate.
+    listSoftDeletedAlbumIds({ userId: session.userId, role: session.role }),
   ]);
 
   const maxBytes = settings.storage.max_gb * 1_000_000_000;

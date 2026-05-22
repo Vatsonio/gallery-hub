@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getAlbumBySlug, listPhotos } from "@/lib/albums";
+import { requireAdmin } from "@/lib/auth-check";
 import { loadAlbumStats } from "@/lib/albumStats";
 import { loadSettings } from "@/lib/settings";
 import { StatsStrip } from "@/components/admin/StatsStrip";
@@ -40,7 +41,8 @@ async function loadShareLinkSummary(albumId: string) {
 
 export default async function AlbumDetailPage({ params }: Props) {
   const { slug } = await params;
-  const album = await getAlbumBySlug(slug);
+  const session = await requireAdmin();
+  const album = await getAlbumBySlug(slug, { userId: session.userId, role: session.role });
   if (!album) notFound();
   const albumId = album.id;
   const [photos, link, stats, settings] = await Promise.all([

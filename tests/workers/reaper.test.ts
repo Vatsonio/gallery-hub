@@ -3,6 +3,7 @@ import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET, ensureBucket } from "@/lib/minio";
 import { handleReap } from "../../workers/reaper";
 import { createAlbum, softDeleteAlbum, getAlbumById, insertPhoto } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { originalKey } from "@/lib/keys";
 import { runMigrations } from "../../scripts/migrate";
 
@@ -15,12 +16,13 @@ const dockerOff = process.env.SKIP_TESTCONTAINERS === "1";
 
 beforeAll(async () => {
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
   if (!dockerOff) await ensureBucket();
 }, 60_000);
 
 describe.skipIf(dockerOff)("handleReap", () => {
   it("hard-deletes soft-deleted album, removes its MinIO objects", async () => {
-    const album = await createAlbum({ title: "ToReap", subtitle: null, status: "draft" });
+    const album = await createAlbum({ title: "ToReap", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const photoId = crypto.randomUUID();
     await insertPhoto({ id: photoId, album_id: album.id, filename: "z.jpg", width: 10, height: 10, orig_bytes: 1, taken_at: null });
     const key = originalKey(album.id, photoId, "jpg");

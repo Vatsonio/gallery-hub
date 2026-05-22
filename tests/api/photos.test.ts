@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { GET } from "@/app/api/albums/[slug]/photos/route";
 import { createAlbum, insertPhoto } from "@/lib/albums";
+import { ensureTestAdminUser, TEST_ADMIN_USER_ID } from "@/lib/test-admin";
 import { runMigrations } from "@/../scripts/migrate";
 
 function mockReq(): Request {
@@ -12,11 +13,12 @@ function mockReq(): Request {
 beforeAll(async () => {
   vi.stubEnv("NODE_ENV", "test");
   await runMigrations({ databaseUrl: process.env.DATABASE_URL!, silent: true });
+  await ensureTestAdminUser();
 });
 
 describe("GET /api/albums/[slug]/photos", () => {
   it("returns photos sorted by sort_order", async () => {
-    const a = await createAlbum({ title: "PollA", subtitle: null, status: "draft" });
+    const a = await createAlbum({ title: "PollA", subtitle: null, status: "draft", ownerUserId: TEST_ADMIN_USER_ID });
     const p1 = crypto.randomUUID();
     await insertPhoto({ id: p1, album_id: a.id, filename: "a.jpg", width: 100, height: 80, orig_bytes: 1, taken_at: null });
     const res = await GET(mockReq(), { params: Promise.resolve({ slug: a.slug }) });

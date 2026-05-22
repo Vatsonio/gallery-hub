@@ -250,10 +250,15 @@ async function main(): Promise<void> {
   const fixtureMs = nowMs() - tFixStart;
   console.log(`[bench] sample JPEG ${sample.length} bytes (built in ${fmt(fixtureMs)})`);
 
+  // The bench writes to a clean test DB; ensure the FK target for
+  // albums.owner_user_id exists before inserting.
+  const { ensureTestAdminUser, TEST_ADMIN_USER_ID } = await import("@/lib/test-admin");
+  await ensureTestAdminUser();
   const album = await createAlbum({
     title: `bench-${args.label}-${Date.now()}`,
     subtitle: null,
     status: "draft",
+    ownerUserId: TEST_ADMIN_USER_ID,
   });
   console.log(`[bench] album=${album.id} slug=${album.slug}`);
 
