@@ -153,7 +153,7 @@ function GalleryShellInner({
         disabled: exportSizes.totalCount === 0,
       },
     ],
-    [exportSizes],
+    [exportSizes, liveFavoritesCount],
   );
 
   const showSaveAllFooter = exportSizes.totalCount > 0;
