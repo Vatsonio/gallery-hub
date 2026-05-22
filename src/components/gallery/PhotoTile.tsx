@@ -128,6 +128,13 @@ export default function PhotoTile({
   const inflight = useRef(false);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
+  // Desktop equivalent of lastTouchTapAt. The browser's native dblclick
+  // event requires the cursor to stay within ~4px between clicks, which
+  // is brutal on a trackpad — users were getting the lightbox instead
+  // of a like whenever the cursor drifted even a hair. Track our own
+  // click time and treat a second click within DOUBLE_TAP_WINDOW_MS as
+  // a soft double-click regardless of cursor movement.
+  const lastMouseClickAt = useRef(0);
   // Track touchstart origin so we can tell a scroll gesture from a real
   // tap on touchend. Without this every flick through the gallery on
   // mobile registered as a tap on the tile under the finger and opened
@@ -323,18 +330,31 @@ export default function PhotoTile({
     // Touch path calls preventDefault on touchend so this never fires
     // for taps — guard anyway.
     if (e.defaultPrevented) return;
-    // Defer navigation by the double-tap window so onDoubleClick has a
-    // chance to claim the gesture as a favorite. onDoubleClick calls
-    // cancelPendingNav() to abort the navigation. detail >= 2 means
-    // this click is the second of a double — abort eagerly so the
-    // navigation doesn't fire on the trailing edge.
+    // Native dblclick: detail >= 2 means the browser linked two clicks
+    // together. Defer to onDoubleClick below to do the toggle and let
+    // this branch just cancel the pending nav from the first click.
     if (e.detail >= 2) {
       cancelPendingNav();
+      lastMouseClickAt.current = 0;
       return;
     }
+    // Soft dblclick: two clicks within DOUBLE_TAP_WINDOW_MS regardless
+    // of cursor movement between them. Required because the native
+    // dblclick event won't fire if the cursor drifted more than a few
+    // pixels — common on trackpads — and the first click's nav timer
+    // would then open the lightbox before the second click registered.
+    const now = Date.now();
+    if (now - lastMouseClickAt.current <= DOUBLE_TAP_WINDOW_MS) {
+      cancelPendingNav();
+      lastMouseClickAt.current = 0;
+      commitToggle(true);
+      return;
+    }
+    lastMouseClickAt.current = now;
     cancelPendingNav();
     pendingNavTimer.current = setTimeout(() => {
       pendingNavTimer.current = null;
+      lastMouseClickAt.current = 0;
       navigateToPhoto();
     }, DOUBLE_TAP_WINDOW_MS);
   }
