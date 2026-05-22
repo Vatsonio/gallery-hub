@@ -74,6 +74,12 @@ function GalleryShellInner({
   const [exportOpen, setExportOpen] = useState(false);
   const [preselect, setPreselect] = useState<ExportOptionId | undefined>(undefined);
   const exportSizes = useExportSizes();
+  // Live count from the FavoritesCount context — reflects every
+  // toggleFavorite the viewer just did on this page. `exportSizes`
+  // was a server-rendered snapshot from page load; relying on it
+  // here kept the "Favorites — originals" option disabled even
+  // after the visitor liked a photo.
+  const { count: liveFavoritesCount } = useFavoritesCount();
 
   // Restore scroll position when returning from the single-photo lightbox.
   // PhotoTile writes sessionStorage[gh:return-scroll:<token>] before nav;
@@ -114,11 +120,16 @@ function GalleryShellInner({
         icon: Heart,
         title: "Favorites — originals",
         subtitle:
-          exportSizes.favoritesCount === 0
+          liveFavoritesCount === 0
             ? "Like some photos first to enable this export"
-            : `${exportSizes.favoritesCount} photo${exportSizes.favoritesCount === 1 ? "" : "s"} · full quality`,
+            : `${liveFavoritesCount} photo${liveFavoritesCount === 1 ? "" : "s"} · full quality`,
+        // bytes is a server snapshot; when the live count diverges from
+        // it we flag the size as approximate. The export route still
+        // streams the correct bytes — this only affects the size hint
+        // shown next to the option.
         bytes: exportSizes.favoritesOriginalBytes,
-        disabled: exportSizes.favoritesCount === 0,
+        approxBytes: liveFavoritesCount !== exportSizes.favoritesCount,
+        disabled: liveFavoritesCount === 0,
       },
       {
         id: "all-web",
