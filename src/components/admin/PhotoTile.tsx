@@ -104,6 +104,15 @@ export function PhotoTile({
         selected ? "ring-2 ring-rose-400" : "ring-white/5"
       }`}
       onPointerDown={(e) => {
+        // Skip the long-press timer if the press landed on an interactive
+        // overlay child (dropdown trigger, drag handle, dropdown menu
+        // items, etc.). Otherwise tapping the "..." MoreVertical button
+        // and holding the menu open for half a second would silently
+        // enter selection mode behind the dropdown.
+        const target = e.target as HTMLElement;
+        if (target.closest('button, [role="button"], [role="menuitem"], [data-radix-collection-item], a[href]')) {
+          return;
+        }
         tapOrigin.current = { x: e.clientX, y: e.clientY };
         tapMoved.current = false;
         longPress?.onPointerDown({ clientX: e.clientX, clientY: e.clientY });

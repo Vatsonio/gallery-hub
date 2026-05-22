@@ -128,6 +128,13 @@ export default function PhotoTile({
   const inflight = useRef(false);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
+  // Track touchstart origin so we can tell a scroll gesture from a real
+  // tap on touchend. Without this every flick through the gallery on
+  // mobile registered as a tap on the tile under the finger and opened
+  // the lightbox instead of scrolling the page.
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const touchMoved = useRef(false);
+  const TOUCH_SLOP_PX = 10;
   // Live favorites badge — bumped optimistically on each tap, reconciled
   // with the server response below. `bump` is stable across renders so
   // it's safe to call from inside commitToggle without re-running effects.
@@ -263,9 +270,35 @@ export default function PhotoTile({
     commitToggle(!favorited);
   }
 
+  function handleTouchStart(e: React.TouchEvent): void {
+    if (e.changedTouches.length !== 1) {
+      touchStart.current = null;
+      return;
+    }
+    const t = e.changedTouches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+    touchMoved.current = false;
+  }
+
+  function handleTouchMove(e: React.TouchEvent): void {
+    if (!touchStart.current || touchMoved.current) return;
+    const t = e.changedTouches[0];
+    const dx = Math.abs(t.clientX - touchStart.current.x);
+    const dy = Math.abs(t.clientY - touchStart.current.y);
+    if (dx > TOUCH_SLOP_PX || dy > TOUCH_SLOP_PX) touchMoved.current = true;
+  }
+
   function handleTouchEnd(e: React.TouchEvent): void {
     // Only register single-finger taps without significant movement.
     if (e.changedTouches.length !== 1) return;
+    // Scroll gesture: the finger moved past the slop between touchstart
+    // and touchend. Swallow synthetic click so we don't open the lightbox
+    // every time the user flicks the page.
+    if (touchMoved.current) {
+      touchStart.current = null;
+      touchMoved.current = false;
+      return;
+    }
     // Prevent the synthetic mouse click that browsers fire ~300ms after
     // touchend. Desktop clicks (real mouse) still navigate via onClick.
     e.preventDefault();
@@ -313,6 +346,8 @@ export default function PhotoTile({
       aria-label="Open photo"
       style={{ ...flexStyle, ["--i" as string]: String(Math.min(index, 60)) }}
       className={`photo-tile group relative block overflow-hidden bg-white/5 cursor-pointer select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] ${className ?? ""}`}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={handleClick}
       onKeyDown={(e) => {
