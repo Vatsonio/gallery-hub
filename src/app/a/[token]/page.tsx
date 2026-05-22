@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { originalKey } from "@/lib/keys";
 import { resolveOriginalExt } from "@/lib/photoExt";
@@ -6,6 +7,7 @@ import { thumbhashToDataUrl } from "@/lib/thumbhash";
 import { watermarkKey } from "@/lib/watermarks";
 import { layoutJustifiedRows } from "@/lib/justified";
 import { loadShareData } from "@/lib/shareLoader";
+import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import PhotoTile from "@/components/gallery/PhotoTile";
 import CoverImage from "@/components/gallery/CoverImage";
 import GalleryShell from "./_gallery-shell";
@@ -36,6 +38,17 @@ interface Props {
 export default async function PublicGalleryPage({ params }: Props) {
   const { token } = await params;
 
+  // Cookie-aware lock check. The cached `loadShareData` below is shared
+  // across all viewers (per-token cache key), so it cannot read the
+  // unlock cookie itself without destroying cache hit rate. We do the
+  // password gate here — `loadShareData` only sees `not_found`/`expired`/`ok`.
+  const jar = await cookies();
+  const unlockCookie = jar.get(unlockCookieName(token))?.value ?? null;
+  const lockStatus = await resolveShareLinkStatus(token, unlockCookie);
+  if (lockStatus.kind === "locked") {
+    redirect(`/a/${token}/password`);
+  }
+
   // Cached per-token loader (unstable_cache wrapper). All DB reads land in
   // Next's full-route cache for `revalidate = 60`, so subsequent hits to
   // the same token render zero queries until the window expires or an
@@ -52,9 +65,6 @@ export default async function PublicGalleryPage({ params }: Props) {
         </div>
       </main>
     );
-  }
-  if (data.kind === "locked") {
-    redirect(`/a/${token}/password`);
   }
 
   const album = data.album;
