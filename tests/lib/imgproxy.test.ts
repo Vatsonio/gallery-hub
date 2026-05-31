@@ -215,7 +215,7 @@ describe("imgproxySrcset", () => {
     );
     const urls = r.srcSet.split(",").map((s) => s.trim().split(" ")[0]);
     expect(urls.every((u) => u.includes("/cachebuster:1234567890/"))).toBe(true);
-    expect(urls.every((u) => u.includes("/watermark:0.6:soea:20:0.25/"))).toBe(true);
+    expect(urls.every((u) => u.includes("/watermark:0.06:soea:20:20:0.25/"))).toBe(true);
   });
 
   it("throws when called with an empty widths array", () => {

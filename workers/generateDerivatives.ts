@@ -35,8 +35,18 @@ async function bodyToBuffer(body: { transformToByteArray: () => Promise<Uint8Arr
  */
 async function readDimensions(buf: Buffer): Promise<{ width: number; height: number }> {
   const meta = await sharp(buf).metadata();
-  const w = meta.width ?? 0;
-  const h = meta.height ?? 0;
+  // F39: content/magic-byte validation. Presign only checks the declared
+  // content-type string, so a caller can PUT arbitrary bytes under
+  // image/jpeg. If sharp can't recognise a raster format (or read
+  // dimensions), this throws and the job fails — the photo never flips to
+  // 'ready', so spoofed/garbage uploads are never served to viewers.
+  if (!meta.format || !meta.width || !meta.height) {
+    throw new Error(
+      `not a decodable image (format=${meta.format ?? "unknown"}, ${meta.width ?? 0}x${meta.height ?? 0})`,
+    );
+  }
+  const w = meta.width;
+  const h = meta.height;
   const orient = meta.orientation ?? 1;
   const rotated = orient >= 5 && orient <= 8;
   return {

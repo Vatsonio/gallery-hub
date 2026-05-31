@@ -113,4 +113,11 @@ export interface GenerateDerivativesJobData {
   album_id: string;
   photo_id: string;
   key: string; // original key
+  /**
+   * 1-based retry counter (F6). pg-boss v10 completes/fails an entire
+   * batch as a unit, so the worker manages per-job retries itself by
+   * re-enqueuing only the failed job with attempt+1 up to a cap; native
+   * pg-boss retry is disabled on these re-enqueues.
+   */
+  attempt?: number;
 }

@@ -169,10 +169,17 @@ function buildProcessingOptions(opts: ImgproxyOptions): string {
     parts.push(`cachebuster:${encodeURIComponent(String(opts.version))}`);
   }
   if (opts.watermark) {
-    // Subtle bottom-right stamp with 6% opacity, 20px inset, 25% scale —
-    // matches the in-process sharp overlay this replaces.
+    // F22: imgproxy's grammar is
+    //   watermark:opacity:position:x_offset:y_offset:scale
+    // The old 4-field "watermark:0.6:soea:20:0.25" was parsed as
+    // opacity=0.6 (60%!), position=soea, x=20, y=0.25 (~0px) and NO scale
+    // (full-size composite) — the intended 0.25 scale was silently consumed
+    // as the y-offset, so every watermarked photo shipped a ~60%-opacity,
+    // full-size wordmark. Use the full 5-field form: subtle 6% opacity,
+    // bottom-right, 20px inset on both axes, scaled to 25% of the image.
+    // (Bump the 0.06 opacity here if you want the stamp more prominent.)
     const wmKey = `s3://${getSigningContextOrFail().bucket}/${opts.watermark.key}`;
-    parts.push(`watermark:0.6:soea:20:0.25`);
+    parts.push(`watermark:0.06:soea:20:20:0.25`);
     parts.push(`wm_url:${base64urlString(wmKey)}`);
   }
   return parts.join("/");

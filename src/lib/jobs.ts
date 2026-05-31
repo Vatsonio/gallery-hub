@@ -5,6 +5,10 @@ export const REAP_DELETED_ALBUMS_QUEUE = "reap-deleted-albums";
 export const REAP_STALE_EXPORTS_QUEUE = "reap-stale-exports";
 export const STORAGE_USAGE_CHECK_QUEUE = "storage-usage-check";
 export const NOTIFICATIONS_QUEUE = "notifications-dispatch";
+// F7: periodic sweep that re-enqueues photos stuck in status='processing'
+// (lost derivative jobs from a worker crash / transient outage) so they
+// can't sit invisible to viewers and exports forever.
+export const RECONCILE_PROCESSING_QUEUE = "reconcile-processing-photos";
 
 let bossPromise: Promise<PgBoss> | null = null;
 
@@ -26,6 +30,7 @@ export async function getBoss(): Promise<PgBoss> {
       await boss.createQueue(REAP_STALE_EXPORTS_QUEUE);
       await boss.createQueue(STORAGE_USAGE_CHECK_QUEUE);
       await boss.createQueue(NOTIFICATIONS_QUEUE);
+      await boss.createQueue(RECONCILE_PROCESSING_QUEUE);
       return boss;
     })();
   }

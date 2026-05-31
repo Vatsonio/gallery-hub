@@ -6,13 +6,23 @@ import {
   REAP_STALE_EXPORTS_QUEUE,
   STORAGE_USAGE_CHECK_QUEUE,
   NOTIFICATIONS_QUEUE,
+  RECONCILE_PROCESSING_QUEUE,
 } from "@/lib/jobs";
 import { handleGenerateDerivatives } from "./generateDerivatives";
 import { handleReap } from "./reaper";
 import { reapStaleExports } from "./exportReaper";
+import { reconcileStuckProcessing } from "./reconcileProcessing";
 import { handleNotificationJob } from "./notifications";
 import { checkStorageQuota } from "@/lib/storage-monitor";
 import type { GenerateDerivativesJobData } from "@/lib/types";
+
+// F6: per-job retry policy. pg-boss v10 completes/fails an entire batch as
+// a unit (manager.js onFetch), so we can't lean on its native retry for a
+// single poison job without re-running its succeeded siblings. We re-enqueue
+// only the failed job up to this many total attempts, then give up (the
+// reconcile sweep is the final backstop).
+const DERIVATIVES_MAX_ATTEMPTS = 4;
+const DERIVATIVES_RETRY_BASE_DELAY_S = 10;
 
 // Cap libvips threads per encode. sharp defaults to "host CPU count",
 // which oversubscribes badly when batchSize > 1: with batchSize=6 and 5
@@ -46,24 +56,47 @@ async function main(): Promise<void> {
     GENERATE_DERIVATIVES_QUEUE,
     { batchSize },
     async (jobs) => {
-      // pg-boss hands us a batch up to `batchSize`. Processing them in
-      // parallel is the whole point of bumping batchSize — sequential
-      // would just be the old `batchSize: 2` behaviour with a larger
-      // window. Failures are captured per-job; we re-throw the first to
-      // let pg-boss requeue the batch, but the others have already run.
-      const results = await Promise.allSettled(
+      // pg-boss v10 completes/fails the WHOLE batch on resolve/throw, so
+      // the old code's "re-throw the first rejection" requeued every job
+      // in the batch — re-downloading and re-processing the siblings that
+      // already succeeded on every retry (F6). Instead: process each job
+      // independently, ALWAYS resolve so the batch completes, and re-enqueue
+      // only the failed job as a fresh single job carrying attempt+1. We
+      // cap attempts ourselves (native retry is disabled on re-enqueues).
+      await Promise.allSettled(
         jobs.map(async (job) => {
+          const data = job.data;
+          const attempt = data.attempt ?? 1;
           try {
-            await handleGenerateDerivatives(job.data);
-            console.log("[worker] derivatives done", job.data.photo_id);
+            await handleGenerateDerivatives(data);
+            console.log("[worker] derivatives done", data.photo_id);
           } catch (err) {
-            console.error("[worker] derivatives FAILED", job.id, err);
-            throw err;
+            if (attempt < DERIVATIVES_MAX_ATTEMPTS) {
+              console.warn(
+                `[worker] derivatives failed (attempt ${attempt}/${DERIVATIVES_MAX_ATTEMPTS}), re-enqueuing ${data.photo_id}`,
+                err,
+              );
+              await boss
+                .send(
+                  GENERATE_DERIVATIVES_QUEUE,
+                  { ...data, attempt: attempt + 1 },
+                  { retryLimit: 0, startAfter: DERIVATIVES_RETRY_BASE_DELAY_S * attempt },
+                )
+                .catch((sendErr) =>
+                  // Re-enqueue itself failed (DB hiccup) — the reconcile
+                  // sweep will pick the photo up since it stays 'processing'.
+                  console.error("[worker] derivatives re-enqueue FAILED", data.photo_id, sendErr),
+                );
+            } else {
+              console.error(
+                `[worker] derivatives PERMANENTLY FAILED after ${attempt} attempts — photo ${data.photo_id} stays 'processing' (reconcile sweep / manual regen is the backstop)`,
+                err,
+              );
+            }
           }
         }),
       );
-      const firstReject = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
-      if (firstReject) throw firstReject.reason;
+      // Never throw: succeeded jobs in the batch must be allowed to complete.
     },
   );
 
@@ -75,6 +108,15 @@ async function main(): Promise<void> {
   await boss.work(REAP_STALE_EXPORTS_QUEUE, async () => {
     const r = await reapStaleExports();
     console.log(`[worker] export-reaper scanned=${r.scanned} deleted=${r.deleted}`);
+  });
+
+  await boss.work(RECONCILE_PROCESSING_QUEUE, async () => {
+    const r = await reconcileStuckProcessing();
+    if (r.scanned > 0) {
+      console.log(
+        `[worker] reconcile scanned=${r.scanned} requeued=${r.requeued} no-object=${r.skipped_no_object}`,
+      );
+    }
   });
 
   await boss.work(STORAGE_USAGE_CHECK_QUEUE, async () => {
@@ -103,6 +145,8 @@ async function main(): Promise<void> {
   await boss.schedule(REAP_DELETED_ALBUMS_QUEUE, "0 * * * *");
   await boss.schedule(REAP_STALE_EXPORTS_QUEUE, "0 */6 * * *");
   await boss.schedule(STORAGE_USAGE_CHECK_QUEUE, "0 * * * *");
+  // F7: re-drive photos stuck in 'processing' every 10 minutes.
+  await boss.schedule(RECONCILE_PROCESSING_QUEUE, "*/10 * * * *");
 
   for (const sig of ["SIGTERM", "SIGINT"] as const) {
     process.on(sig, async () => {

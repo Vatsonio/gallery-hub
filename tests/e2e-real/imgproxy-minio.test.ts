@@ -218,7 +218,7 @@ describe.skipIf(dockerOff)("e2e — imgproxy + MinIO real bytes", () => {
       format: "jpg",
       watermark: { key: watermarkKey },
     });
-    expect(urlWm).toContain("/watermark:0.6:soea:20:0.25/");
+    expect(urlWm).toContain("/watermark:0.06:soea:20:20:0.25/");
     expect(urlWm).toContain("/wm_url:");
   }, 60_000);
 });
