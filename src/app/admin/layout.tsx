@@ -36,9 +36,9 @@ const NAV: NavSection[] = [
     title: "Insights",
     items: [
       { href: "/admin/selections", label: "Client Selections", icon: Heart },
-      { href: "/admin/notifications", label: "Notifications", icon: Bell },
+      { href: "/admin/notifications", label: "Notifications", icon: Bell, ownerOnly: true },
       { href: "/admin/metrics", label: "Metrics", icon: BarChart3, ownerOnly: true },
-      { href: "/chikaq", label: "PostHog", icon: Activity },
+      { href: "/chikaq", label: "PostHog", icon: Activity, ownerOnly: true },
     ],
   },
   {

@@ -1,4 +1,5 @@
 import { sql } from "@/lib/db";
+import type { AdminViewer } from "@/lib/albums";
 
 /**
  * Aggregated stats surfaced on the admin album page. Computed in one
@@ -29,7 +30,7 @@ export interface AlbumStats {
  * camera only — the StatsStrip has limited horizontal room and the
  * long-tail makes for a confusing chip.
  */
-export async function loadAlbumStats(albumId: string): Promise<AlbumStats> {
+export async function loadAlbumStats(albumId: string, viewer: AdminViewer): Promise<AlbumStats> {
   const aggRows = await sql<{
     storage_bytes: string | number;
     shot_from: Date | string | null;
@@ -69,9 +70,19 @@ export async function loadAlbumStats(albumId: string): Promise<AlbumStats> {
   `;
   const a = aggRows[0];
 
-  const libRows = await sql<{ bytes: string | number }[]>`
-    SELECT COALESCE(SUM(orig_bytes), 0)::bigint AS bytes FROM photos
-  `;
+  // F12: the "X% of library" bar must not leak other workspaces' byte
+  // footprint. Owner sees the true installation-wide total; a non-owner
+  // admin only sees the sum across albums they own.
+  const libRows = viewer.role === "owner"
+    ? await sql<{ bytes: string | number }[]>`
+        SELECT COALESCE(SUM(orig_bytes), 0)::bigint AS bytes FROM photos
+      `
+    : await sql<{ bytes: string | number }[]>`
+        SELECT COALESCE(SUM(p.orig_bytes), 0)::bigint AS bytes
+          FROM photos p
+          JOIN albums a ON a.id = p.album_id
+         WHERE a.owner_user_id = ${viewer.userId}
+      `;
   const libraryBytes = Number(libRows[0]?.bytes ?? 0);
 
   const topCameraCount = a.top_camera_count === null ? 0 : Number(a.top_camera_count);

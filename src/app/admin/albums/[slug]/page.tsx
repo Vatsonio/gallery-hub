@@ -48,7 +48,7 @@ export default async function AlbumDetailPage({ params }: Props) {
   const [photos, link, stats, settings] = await Promise.all([
     listPhotos(albumId),
     loadShareLinkSummary(albumId),
-    loadAlbumStats(albumId),
+    loadAlbumStats(albumId, { userId: session.userId, role: session.role }),
     loadSettings(),
   ]);
   const albumCapBytes = settings.uploads.max_album_gb > 0

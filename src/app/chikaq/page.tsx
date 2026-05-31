@@ -179,6 +179,13 @@ function sparklineDaysFor(period: ChikaqPeriod): number {
 export default async function ChikaqPage({ searchParams }: PageProps): Promise<React.JSX.Element> {
   const auth = await requireAdminSessionFromCookies();
   if (!auth.ok) redirect("/admin/login?next=/chikaq");
+  // F1: every aggregator below (loadInsightsStats/loadTopAlbums/
+  // loadRecentActivity24h/loadViewsTrend/loadTileSparklines/getStorageUsage)
+  // is installation-wide with NO owner_user_id scoping, so this dashboard
+  // exposes cross-workspace album titles, view leaderboards and storage
+  // totals. It is owner-only telemetry — non-owner admins are bounced to
+  // their own workspace. (Matches the ownerOnly gating on /admin/metrics.)
+  if (auth.role !== "owner") redirect("/admin/albums");
 
   const sp = (await searchParams) ?? {};
   const period: ChikaqPeriod = parseChikaqPeriod(sp.period ?? null);

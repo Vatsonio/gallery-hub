@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth-check";
+import { requireOwner } from "@/lib/auth-check";
 import {
   dispatchNotification,
   type NotificationEventType,
@@ -23,7 +23,11 @@ export interface UpdateRuleInput {
  * can't silently break the dispatcher's threshold reads.
  */
 export async function updateRule(input: UpdateRuleInput): Promise<{ ok: true } | { error: string }> {
-  await requireAdmin();
+  // F3/F31: notification_rules + notification_log are global (no owner
+  // column) and expose the owner's Telegram chat_id, cross-workspace album
+  // titles and viewer ids. Owner-only — a non-owner admin must not read the
+  // log, mutate global rules, or fire test/replay sends.
+  await requireOwner();
   if (!input.event_type) return { error: "event_type required" };
 
   let parsed: string | null = null;
@@ -61,7 +65,11 @@ export async function updateRule(input: UpdateRuleInput): Promise<{ ok: true } |
  * dispatcher's enabled gate is bypassed via a direct write).
  */
 export async function testNotification(): Promise<{ ok: true; id: string } | { error: string }> {
-  await requireAdmin();
+  // F3/F31: notification_rules + notification_log are global (no owner
+  // column) and expose the owner's Telegram chat_id, cross-workspace album
+  // titles and viewer ids. Owner-only — a non-owner admin must not read the
+  // log, mutate global rules, or fire test/replay sends.
+  await requireOwner();
   const chat = process.env.TELEGRAM_CHAT_ID ?? "";
   if (!chat) return { error: "TELEGRAM_CHAT_ID not set" };
 
@@ -99,7 +107,11 @@ export async function testNotification(): Promise<{ ok: true; id: string } | { e
 export async function replayFailed(
   notification_id: string,
 ): Promise<{ ok: true } | { error: string }> {
-  await requireAdmin();
+  // F3/F31: notification_rules + notification_log are global (no owner
+  // column) and expose the owner's Telegram chat_id, cross-workspace album
+  // titles and viewer ids. Owner-only — a non-owner admin must not read the
+  // log, mutate global rules, or fire test/replay sends.
+  await requireOwner();
   const rows = await sql<{ id: string }[]>`
     UPDATE notification_log
        SET status = 'queued', last_error = NULL
@@ -121,7 +133,11 @@ export async function _testDispatchForAdmin(args: {
   event_type: NotificationEventType;
   text: string;
 }): Promise<string> {
-  await requireAdmin();
+  // F3/F31: notification_rules + notification_log are global (no owner
+  // column) and expose the owner's Telegram chat_id, cross-workspace album
+  // titles and viewer ids. Owner-only — a non-owner admin must not read the
+  // log, mutate global rules, or fire test/replay sends.
+  await requireOwner();
   const r = await dispatchNotification({
     event_type: args.event_type,
     dedup_key: `admin_test:${randomUUID()}`,

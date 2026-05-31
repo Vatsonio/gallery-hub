@@ -1,5 +1,5 @@
 import { Bell, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
-import { requireAdmin } from "@/lib/auth-check";
+import { requireOwner } from "@/lib/auth-check";
 import { sql } from "@/lib/db";
 import { updateRule, testNotification, replayFailed } from "./actions";
 
@@ -46,7 +46,9 @@ const STATUS_TINT: Record<string, string> = {
  *  - Recent log: last 50 dispatches with status + error + replay button.
  */
 export default async function NotificationsPage(): Promise<React.JSX.Element> {
-  await requireAdmin();
+  // F3: global notification log/rules expose cross-workspace data + the
+  // owner's Telegram chat_id. Owner-only, matching the nav's ownerOnly flag.
+  await requireOwner();
 
   const [rules, logs, lastSent] = await Promise.all([
     sql<RuleRow[]>`

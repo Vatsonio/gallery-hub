@@ -3,6 +3,9 @@ import { setupTestDb, resetTestDb } from "./_helpers";
 import { sql } from "@/lib/db";
 import { randomUUID } from "node:crypto";
 import { loadAlbumStats } from "@/lib/albumStats";
+import { TEST_ADMIN_USER_ID } from "@/lib/test-admin";
+
+const VIEWER = { userId: TEST_ADMIN_USER_ID, role: "owner" as const };
 
 beforeAll(async () => {
   process.env.GH_TEST_BYPASS_AUTH = "1";
@@ -18,8 +21,8 @@ const dockerOff = process.env.SKIP_TESTCONTAINERS === "1";
 async function album(slug: string): Promise<string> {
   const id = randomUUID();
   await sql`
-    INSERT INTO albums (id, slug, title, status)
-    VALUES (${id}, ${slug}, ${"T-" + slug}, 'draft')
+    INSERT INTO albums (id, slug, title, status, owner_user_id)
+    VALUES (${id}, ${slug}, ${"T-" + slug}, 'draft', ${TEST_ADMIN_USER_ID})
   `;
   return id;
 }
@@ -50,7 +53,7 @@ async function photo(albumId: string, seed: PhotoSeed = {}): Promise<string> {
 describe.skipIf(dockerOff)("loadAlbumStats", () => {
   it("returns zero-state shape for an empty album", async () => {
     const id = await album("empty");
-    const s = await loadAlbumStats(id);
+    const s = await loadAlbumStats(id, VIEWER);
     expect(s).toEqual({
       storage_bytes: 0,
       shot_from: null,
@@ -67,7 +70,7 @@ describe.skipIf(dockerOff)("loadAlbumStats", () => {
     await photo(a, { orig_bytes: 2_000_000 });
     await photo(a, { orig_bytes: 3_000_000 });
     await photo(b, { orig_bytes: 500_000 });
-    const s = await loadAlbumStats(a);
+    const s = await loadAlbumStats(a, VIEWER);
     expect(s.storage_bytes).toBe(5_000_000);
     expect(s.library_bytes).toBe(5_500_000);
   });
@@ -77,7 +80,7 @@ describe.skipIf(dockerOff)("loadAlbumStats", () => {
     await photo(id, { taken_at: new Date("2026-09-12T10:00:00Z") });
     await photo(id, { taken_at: new Date("2026-09-14T18:30:00Z") });
     await photo(id, { taken_at: null });
-    const s = await loadAlbumStats(id);
+    const s = await loadAlbumStats(id, VIEWER);
     expect(s.shot_from).toBe("2026-09-12T10:00:00.000Z");
     expect(s.shot_to).toBe("2026-09-14T18:30:00.000Z");
   });
@@ -89,7 +92,7 @@ describe.skipIf(dockerOff)("loadAlbumStats", () => {
     await photo(id, { exif: { camera: "Sony A7M3" } });
     await photo(id, { exif: { camera: "Canon R5" } });
     await photo(id, {}); // no exif — excluded from percentage
-    const s = await loadAlbumStats(id);
+    const s = await loadAlbumStats(id, VIEWER);
     expect(s.top_camera).toBe("Sony A7M3");
     // 3 of 4 EXIF-tagged photos used the A7M3.
     expect(s.top_camera_pct).toBe(75);
@@ -99,7 +102,7 @@ describe.skipIf(dockerOff)("loadAlbumStats", () => {
     const id = await album("no-exif");
     await photo(id);
     await photo(id);
-    const s = await loadAlbumStats(id);
+    const s = await loadAlbumStats(id, VIEWER);
     expect(s.top_camera).toBeNull();
     expect(s.top_camera_pct).toBeNull();
   });
