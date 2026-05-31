@@ -53,19 +53,21 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "album not found" }, { status: 404 });
   }
 
-  if (settings.storage.block_uploads_when_full) {
-    const usage = await getStorageUsage();
-    const capBytes = settings.storage.max_gb * 1_000_000_000;
-    if (usage.usedBytes >= capBytes) {
-      return NextResponse.json({ reason: "storage_full" }, { status: 507 });
-    }
-  }
-
   // Pre-compute incoming bytes — reused by every quota check below.
   const incomingBytes = body.files.reduce(
     (acc, f) => acc + (typeof f.size === "number" && f.size > 0 ? f.size : 0),
     0,
   );
+
+  // F40: gate on used + incoming (the old check only blocked once already
+  // AT the cap, letting a single batch overshoot by its whole size).
+  if (settings.storage.block_uploads_when_full) {
+    const usage = await getStorageUsage();
+    const capBytes = settings.storage.max_gb * 1_000_000_000;
+    if (usage.usedBytes + incomingBytes >= capBytes) {
+      return NextResponse.json({ reason: "storage_full" }, { status: 507 });
+    }
+  }
 
   // Per-album cap (0 = disabled). Sums all photos already in this album
   // (ready + processing) and rejects the batch if the new files would

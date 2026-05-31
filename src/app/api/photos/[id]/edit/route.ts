@@ -5,7 +5,14 @@ import { requireAdminSession } from "@/lib/auth-check";
 import { s3Client, BUCKET, headObject } from "@/lib/minio";
 import { originalKey } from "@/lib/keys";
 import { getAlbumById, assertAdminAlbumAccess } from "@/lib/albums";
+import { loadSettings } from "@/lib/settings";
+import { getStorageUsage } from "@/lib/storage-usage";
 import { sql } from "@/lib/db";
+
+// F10: cap the decoded pixel count so a small but highly-compressed
+// "decompression bomb" original can't blow up memory on every edit. Pro
+// cameras top out well under this; medium-format 150MP still passes.
+const MAX_EDIT_INPUT_PIXELS = 200_000_000;
 import { getBoss, GENERATE_DERIVATIVES_QUEUE } from "@/lib/jobs";
 import { validatePhotoEditPayload, brightnessToModulate, PhotoEditValidationError } from "@/lib/photo-edit";
 import { isSameOrigin } from "@/lib/same-origin";
@@ -97,8 +104,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   // sharp collapses repeated rotate() calls into one — so we must
   // bake the EXIF auto-orientation into a fresh buffer first, then
   // build the transform pipeline from that pre-oriented buffer. That
-  // way subsequent rotate(angle) calls aren't swallowed.
-  const oriented = await sharp(buf).rotate().toBuffer();
+  // way subsequent rotate(angle) calls aren't swallowed. limitInputPixels
+  // (F10) rejects decompression bombs at decode time.
+  const oriented = await sharp(buf, { limitInputPixels: MAX_EDIT_INPUT_PIXELS }).rotate().toBuffer();
   let pipeline = sharp(oriented);
 
   if (payload.crop) {
@@ -136,6 +144,34 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     outBuf = await pipeline.webp({ quality: 92 }).toBuffer();
   } else {
     outBuf = await pipeline.jpeg({ quality: 92 }).toBuffer();
+  }
+
+  // F10: the edit rewrites the original with a new byte size but used to
+  // run none of the upload-path storage guards — an admin could loop edits
+  // to grow a photo past the album/global cap and keep writing while
+  // storage was full. Re-check before persisting any size increase. A
+  // shrink (crop/down-encode) frees space and always passes.
+  const settings = await loadSettings();
+  const delta = outBuf.length - (photo.orig_bytes ?? 0);
+  if (delta > 0) {
+    if (settings.storage.block_uploads_when_full) {
+      const usage = await getStorageUsage();
+      if (usage.usedBytes + delta >= settings.storage.max_gb * 1_000_000_000) {
+        return NextResponse.json({ reason: "storage_full" }, { status: 507 });
+      }
+    }
+    const albumCapGb = settings.uploads.max_album_gb;
+    if (albumCapGb && albumCapGb > 0) {
+      const rows = await sql<{ used: string | null }[]>`
+        SELECT COALESCE(SUM(orig_bytes), 0)::text AS used
+          FROM photos WHERE album_id = ${photo.album_id} AND status IN ('ready','processing')`;
+      // The album sum already includes this photo's CURRENT orig_bytes, so
+      // the projected total after the rewrite is (sum + delta).
+      const projected = Number(rows[0]?.used ?? "0") + delta;
+      if (projected > albumCapGb * 1_000_000_000) {
+        return NextResponse.json({ reason: "album_cap_exceeded" }, { status: 507 });
+      }
+    }
   }
 
   // Write back to the same key — variants will get re-rendered below.

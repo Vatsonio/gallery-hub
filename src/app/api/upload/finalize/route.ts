@@ -8,13 +8,34 @@ import { sanitizeFilename } from "@/lib/sanitize";
 import { notifyNewUpload } from "@/lib/notifications";
 import { isImgproxyEnabled, warmImgproxyVariants } from "@/lib/imgproxy";
 import { loadSettings } from "@/lib/settings";
+import { getStorageUsage } from "@/lib/storage-usage";
+import { headObject } from "@/lib/minio";
 import { sql } from "@/lib/db";
 import type { FinalizeRequestBody, FinalizeResponse, GenerateDerivativesJobData } from "@/lib/types";
 
-function inferExt(filename: string): string {
-  const m = filename.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/);
-  if (!m) return "jpg";
-  return m[1] === "jpeg" ? "jpg" : m[1];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EXT_CANDIDATES = ["jpg", "png", "webp"] as const;
+
+/**
+ * F2/F41: find the actually-uploaded original for a photo and read its
+ * authoritative byte size. The stored extension derives from the presign
+ * content-type (not the filename), so we probe the candidate extensions
+ * via HEAD. Returns null when no object was ever uploaded (phantom row).
+ */
+async function discoverOriginal(
+  albumId: string,
+  photoId: string,
+): Promise<{ key: string; bytes: number } | null> {
+  for (const ext of EXT_CANDIDATES) {
+    const key = originalKey(albumId, photoId, ext);
+    try {
+      const head = await headObject(key);
+      return { key, bytes: Number(head.ContentLength ?? 0) };
+    } catch {
+      // not this extension — try the next
+    }
+  }
+  return null;
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -61,76 +82,113 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  // F28: validate each photo before any DB work. photo_id becomes a PK +
+  // an S3 key segment; width/height are NOT NULL integer columns. Reject
+  // the whole batch on a malformed row rather than 500-ing mid-insert.
+  for (const p of body.photos) {
+    if (
+      typeof p?.photo_id !== "string" || !UUID_RE.test(p.photo_id) ||
+      !Number.isInteger(p.width) || p.width <= 0 ||
+      !Number.isInteger(p.height) || p.height <= 0
+    ) {
+      return NextResponse.json({ error: "invalid photo metadata in batch" }, { status: 400 });
+    }
+  }
+
   const boss = await getBoss();
 
-  // F7: client-supplied filenames are normalized + stripped of path
-  // separators, control chars, leading dots, etc. before they land in the
-  // DB. Downstream consumers (ZIP entry names, Content-Disposition,
-  // Telegram notifications) all read from the sanitized DB value.
+  // F7: sanitize filenames before they hit the DB / ZIP entry names /
+  // Content-Disposition / Telegram messages.
   const sanitized = body.photos.map((p) => ({
     photo_id: p.photo_id,
     filename: sanitizeFilename(p.filename),
     width: p.width,
     height: p.height,
-    size: p.size,
   }));
 
-  // Single round-trip INSERT for the whole batch — at 150 photos this
-  // collapses 150 sequential round-trips into one (saves ~3–5 s on the
-  // dev stack).
+  // F2/F41: never trust the client-supplied byte size and never finalize a
+  // row whose object was never uploaded. HEAD each presigned key to confirm
+  // the upload landed and read the authoritative ContentLength. Photos with
+  // no backing object (phantom finalize) are dropped from the batch.
+  const resolved = (
+    await Promise.all(
+      sanitized.map(async (p) => {
+        const found = await discoverOriginal(album.id, p.photo_id);
+        if (!found) {
+          console.warn(`[finalize] no uploaded object for ${p.photo_id} — skipping`);
+          return null;
+        }
+        return { ...p, key: found.key, orig_bytes: found.bytes };
+      }),
+    )
+  ).filter((p): p is NonNullable<typeof p> => p !== null);
+
+  if (resolved.length === 0) {
+    return NextResponse.json({ inserted: 0 } satisfies FinalizeResponse);
+  }
+
+  // F9: re-evaluate byte quotas with the TRUE sizes. Presign checked them
+  // against the spoofable client sizes, and concurrent presigns could each
+  // have seen a stale pre-batch total — so the per-album and global caps are
+  // re-checked here, now that orig_bytes is trustworthy, before committing.
+  const realIncoming = resolved.reduce((acc, p) => acc + p.orig_bytes, 0);
+  const albumCapGb = settings.uploads.max_album_gb;
+  if (albumCapGb && albumCapGb > 0) {
+    const rows = await sql<{ used: string | null }[]>`
+      SELECT COALESCE(SUM(orig_bytes), 0)::text AS used
+        FROM photos WHERE album_id = ${album.id} AND status IN ('ready','processing')
+    `;
+    const used = Number(rows[0]?.used ?? "0");
+    if (used + realIncoming > albumCapGb * 1_000_000_000) {
+      return NextResponse.json({ reason: "album_cap_exceeded" }, { status: 507 });
+    }
+  }
+  if (settings.storage.block_uploads_when_full) {
+    const usage = await getStorageUsage();
+    if (usage.usedBytes + realIncoming >= settings.storage.max_gb * 1_000_000_000) {
+      return NextResponse.json({ reason: "storage_full" }, { status: 507 });
+    }
+  }
+
+  // Single round-trip INSERT for the whole (resolved) batch. orig_bytes is
+  // the real object size; created_by_user_id is the calling admin (the
+  // test bypass now seeds a real admin_users row, so the FK always resolves).
   await insertPhotosBatch(
-    sanitized.map((p) => ({
+    resolved.map((p) => ({
       id: p.photo_id,
       album_id: album.id,
       filename: p.filename,
       width: p.width,
       height: p.height,
-      orig_bytes: p.size,
+      orig_bytes: p.orig_bytes,
       taken_at: null,
-      // F12: stamp the uploader so per-user quotas at presign can sum
-      // only this user's bytes. Test-bypass sessions (auth.userId =
-      // "test-admin") never resolve to a real admin_users row so the FK
-      // would explode — null it out instead.
-      created_by_user_id: auth.userId === "test-admin" ? null : auth.userId,
+      created_by_user_id: auth.userId,
     })),
   );
 
-  // Batch enqueue too — pg-boss v10's `insert` writes all rows in one SQL
-  // statement, replacing 150 boss.send() round-trips with a single one.
-  const jobs = sanitized.map((p) => {
-    const ext = inferExt(p.filename);
+  // Batch enqueue derivative jobs using the discovered real key (fixes the
+  // F41 ext-mismatch where the filename ext diverged from the stored one).
+  const jobs = resolved.map((p) => {
     const data: GenerateDerivativesJobData = {
       album_id: album.id,
       photo_id: p.photo_id,
-      key: originalKey(album.id, p.photo_id, ext),
+      key: p.key,
     };
-    return {
-      name: GENERATE_DERIVATIVES_QUEUE,
-      data: data as unknown as object,
-    };
+    return { name: GENERATE_DERIVATIVES_QUEUE, data: data as unknown as object };
   });
   if (jobs.length > 0) await boss.insert(jobs);
 
-  const inserted = sanitized.length;
-  if (inserted > 0) {
-    void notifyNewUpload({
-      album_id: album.id,
-      album_title: album.title,
-      photo_count: inserted,
-    });
-  }
+  const inserted = resolved.length;
+  void notifyNewUpload({
+    album_id: album.id,
+    album_title: album.title,
+    photo_count: inserted,
+  });
 
-  // Pre-warm imgproxy for the two hot variants (thumb + web) so the first
-  // real viewer doesn't pay the 200–500 ms cold-encode cost per tile. We
-  // fire-and-forget so finalize itself stays sub-second even at 150 photos:
-  // the warm storm runs in the background of the Node event loop and is
-  // bounded by imgproxy's own concurrency limit. Originals haven't been
-  // versioned yet (worker hasn't bumped updated_at) so we omit the version
-  // param — imgproxy still caches against the raw s3:// source key.
-  if (inserted > 0 && isImgproxyEnabled()) {
-    const warmItems = sanitized.map((p) => ({
-      s3Key: originalKey(album.id, p.photo_id, inferExt(p.filename)),
-    }));
+  // Pre-warm imgproxy for the hot variants so the first viewer doesn't pay
+  // the cold-encode cost. Fire-and-forget; bounded by imgproxy concurrency.
+  if (isImgproxyEnabled()) {
+    const warmItems = resolved.map((p) => ({ s3Key: p.key }));
     void warmImgproxyVariants(warmItems).catch((err) => {
       // eslint-disable-next-line no-console
       console.warn("[finalize] imgproxy warm failed:", (err as Error).message);
