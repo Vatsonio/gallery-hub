@@ -133,6 +133,14 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Ad
   if (current.role === "admin" && input.role === "owner") {
     throw new Error("cannot promote an admin to owner (one owner only)");
   }
+  // F8: never disable the sole owner. Login + every session check reject
+  // disabled_at IS NOT NULL, and only an owner can re-enable a user, so
+  // disabling the owner is an in-app-irrecoverable lockout (recovery needs
+  // direct DB access). The UI hides the control client-side but the action
+  // forwarded `disabled` with no server-side re-check.
+  if (current.role === "owner" && input.disabled === true) {
+    throw new Error("cannot disable the owner");
+  }
   const disabledAt =
     input.disabled === undefined
       ? null

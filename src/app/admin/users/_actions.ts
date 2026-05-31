@@ -72,7 +72,12 @@ export async function updateUserAction(formData: FormData): Promise<void> {
   const disabledRaw = formData.get("disabled");
   const returnTo = String(formData.get("returnTo") ?? "");
 
-  const role = roleRaw === "owner" || roleRaw === "admin" ? roleRaw : undefined;
+  // F34: only ever accept "admin" from this action. The UI offers no other
+  // role, but the action used to forward "owner" too — the sole guard
+  // against an admin→owner escalation then lived only in updateUser's code
+  // check + the DB partial-unique index. Rejecting "owner" here keeps that
+  // a defense-in-depth backstop rather than the single line of defense.
+  const role = roleRaw === "admin" ? "admin" : undefined;
   const disabled = disabledRaw === null ? undefined : disabledRaw === "1";
 
   try {

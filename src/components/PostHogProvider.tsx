@@ -48,8 +48,14 @@ export default function PostHogProvider({
       autocapture: false,
       // Respect Do Not Track.
       respect_dnt: true,
-      // Session replay is opt-in inside the PostHog UI; default off here.
-      disable_session_recording: false,
+      // F19: hard-disable session replay locally. This provider mounts for
+      // every non-admin viewer of a PRIVATE gallery; with `false`, replay
+      // deferred to PostHog remote config, so a one-click enable in the
+      // PostHog UI would silently start recording clients browsing their
+      // own private photos. `true` kills it at the client regardless of
+      // remote config. Set NEXT_PUBLIC_PH_SESSION_REPLAY=1 to opt back in.
+      disable_session_recording:
+        process.env.NEXT_PUBLIC_PH_SESSION_REPLAY !== "1",
     });
 
     if (distinctId) {
