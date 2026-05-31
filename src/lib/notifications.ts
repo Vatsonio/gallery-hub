@@ -24,6 +24,7 @@
 import { sql } from "@/lib/db";
 import { getBoss, NOTIFICATIONS_QUEUE } from "@/lib/jobs";
 import { safeCapture } from "@/lib/analytics";
+import { loadSettings, TELEGRAM_EVENT_KEYS, type TelegramEventKey } from "@/lib/settings";
 
 export type NotificationEventType =
   | "first_share_view"
@@ -48,7 +49,7 @@ export interface DispatchResult {
   /** UUID of the inserted notification_log row, null on dedup hit. */
   id: string | null;
   skipped: boolean;
-  skip_reason?: "duplicate" | "disabled" | "no_chat" | "rule_missing";
+  skip_reason?: "duplicate" | "disabled" | "no_chat" | "rule_missing" | "throttled";
 }
 
 interface NotificationRuleRow {
@@ -76,7 +77,36 @@ export async function getRule(
  * chat-id — callers must NOT treat that as an error.
  */
 export async function dispatchNotification(args: DispatchArgs): Promise<DispatchResult> {
-  const chat = args.chat_id ?? process.env.TELEGRAM_CHAT_ID ?? "";
+  // F24: the app_settings.telegram block (enabled / chat_id / events) used
+  // to be dead config — dispatch only ever read process.env.TELEGRAM_CHAT_ID
+  // and notification_rules. We now honour the settings UI, but ONLY once it
+  // has been configured (a chat_id is set there) so env-only deployments
+  // keep working unchanged:
+  //   - UI-configured (settings.telegram.chat_id set): the master `enabled`
+  //     switch and the per-event `events` toggles are authoritative, and the
+  //     settings chat_id is used.
+  //   - Not UI-configured: legacy behaviour — env chat id, no settings gate.
+  // The bot token is always env-only (F25); it is never read from settings.
+  const settings = await loadSettings();
+  const uiConfigured = settings.telegram.chat_id.trim().length > 0;
+  let chat: string;
+  if (uiConfigured) {
+    if (!settings.telegram.enabled) {
+      return { id: null, skipped: true, skip_reason: "disabled" };
+    }
+    // Per-event gate, but only for events the settings taxonomy actually
+    // covers — events outside it (new_upload, suspicious_ip, test) are
+    // governed solely by notification_rules so they aren't silently dropped.
+    if (
+      (TELEGRAM_EVENT_KEYS as readonly string[]).includes(args.event_type) &&
+      !settings.telegram.events.includes(args.event_type as TelegramEventKey)
+    ) {
+      return { id: null, skipped: true, skip_reason: "disabled" };
+    }
+    chat = args.chat_id ?? settings.telegram.chat_id;
+  } else {
+    chat = args.chat_id ?? process.env.TELEGRAM_CHAT_ID ?? "";
+  }
   if (!chat) {
     return { id: null, skipped: true, skip_reason: "no_chat" };
   }
@@ -87,6 +117,23 @@ export async function dispatchNotification(args: DispatchArgs): Promise<Dispatch
   }
   if (!rule.enabled) {
     return { id: null, skipped: true, skip_reason: "disabled" };
+  }
+
+  // F26: enforce the rolling min-interval throttle. It was configured in
+  // notification_rules and surfaced in the UI but never read — only the
+  // dedup key (which collapses identical tuples, not a rolling window) had
+  // any effect, so an operator's "max one every 10 min" setting did nothing.
+  if (rule.min_interval_seconds > 0) {
+    const recent = await sql<{ one: number }[]>`
+      SELECT 1 AS one FROM notification_log
+       WHERE event_type = ${args.event_type}
+         AND chat_id = ${chat}
+         AND created_at > now() - make_interval(secs => ${rule.min_interval_seconds})
+       LIMIT 1
+    `;
+    if (recent.length > 0) {
+      return { id: null, skipped: true, skip_reason: "throttled" };
+    }
   }
 
   // Atomic insert-if-not-exists. The unique constraint on

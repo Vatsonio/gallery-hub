@@ -12,7 +12,6 @@ import {
 import { requireOwner } from "@/lib/auth-check";
 import {
   loadSettings,
-  maskTokenTail,
   TELEGRAM_EVENT_KEYS,
   type TelegramEventKey,
 } from "@/lib/settings";
@@ -25,7 +24,6 @@ import {
   saveRetentionSettings,
   saveShareLinkDefaults,
   saveTelegramSettings,
-  clearTelegramToken,
   saveMaintenance,
   saveUploadLimits,
 } from "./_actions";
@@ -52,8 +50,6 @@ const cardCls =
 const sectionHeader = "flex items-center gap-3 mb-1";
 const saveBtn =
   "rounded-lg bg-rose-accent hover:bg-rose-hover transition px-4 py-2 text-sm font-medium cursor-pointer text-white";
-const altBtn =
-  "rounded-lg bg-bg-card hover:bg-white/5 border border-line transition px-3 py-2 text-sm cursor-pointer";
 
 function Banner({
   kind,
@@ -101,8 +97,9 @@ export default async function SettingsPage({
   const sectionSaved = sp.saved === "1";
   const activeSection = sp.section ?? null;
 
-  const tokenSet = settings.telegram.bot_token.length > 0;
-  const tokenTail = maskTokenTail(settings.telegram.bot_token);
+  // F25: the bot token is env-only now (never persisted), so its status
+  // reflects the TELEGRAM_BOT_TOKEN env var, not app_settings.
+  const tokenSet = (process.env.TELEGRAM_BOT_TOKEN ?? "").length > 0;
 
   function bannerFor(section: string): React.JSX.Element | null {
     if (activeSection !== section) return null;
@@ -324,36 +321,22 @@ export default async function SettingsPage({
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <span className={labelCls}>Bot token</span>
-              {tokenSet ? (
-                <div className="mt-1 flex items-center gap-2">
+              {/* F25: the token is managed via the TELEGRAM_BOT_TOKEN env var
+                  only — never stored in the database. This is a read-only
+                  status, not an input. */}
+              <div className="mt-1">
+                {tokenSet ? (
                   <span className="inline-flex items-center gap-2 rounded-md bg-bg-card border border-line px-3 py-2 text-sm">
                     <CheckCircle2 className="size-4 text-emerald-300" />
-                    Configured (....{tokenTail})
+                    Configured via TELEGRAM_BOT_TOKEN
                   </span>
-                  <label className="inline-flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      name="replace_token"
-                      value="1"
-                      className="size-4 accent-rose-500"
-                    />
-                    Replace
-                  </label>
-                </div>
-              ) : (
-                <input type="hidden" name="replace_token" value="1" />
-              )}
-              <input
-                type="password"
-                name="bot_token"
-                autoComplete="off"
-                placeholder={
-                  tokenSet
-                    ? "New token (only saved when Replace is ticked)"
-                    : "Paste bot token"
-                }
-                className={`mt-2 ${inputCls}`}
-              />
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-md bg-bg-card border border-line px-3 py-2 text-sm text-text-muted">
+                    <AlertTriangle className="size-4 text-amber-300" />
+                    Set the TELEGRAM_BOT_TOKEN env var to enable
+                  </span>
+                )}
+              </div>
             </div>
             <label className="block">
               <span className={labelCls}>Chat id</span>
@@ -399,15 +382,6 @@ export default async function SettingsPage({
             </div>
           </fieldset>
           <div className="flex flex-wrap justify-end gap-2">
-            {tokenSet ? (
-              <button
-                type="submit"
-                formAction={clearTelegramToken}
-                className={altBtn}
-              >
-                Clear token
-              </button>
-            ) : null}
             <button type="submit" className={saveBtn}>
               Save Telegram
             </button>

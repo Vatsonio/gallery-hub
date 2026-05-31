@@ -43,7 +43,10 @@ export async function updateRule(input: UpdateRuleInput): Promise<{ ok: true } |
       return { error: "threshold must be valid JSON or empty" };
     }
   }
-  const min = Math.max(0, Math.min(86_400, Math.floor(input.min_interval_seconds)));
+  // F26: coerce a non-numeric/NaN form value to 0 rather than writing NaN
+  // into the INT column.
+  const rawMin = Math.floor(input.min_interval_seconds);
+  const min = Number.isFinite(rawMin) ? Math.max(0, Math.min(86_400, rawMin)) : 0;
 
   // Cast through ::jsonb so postgres.js sends the value as text and Postgres
   // re-parses it — avoids the strict JSONValue typing on sql.json().

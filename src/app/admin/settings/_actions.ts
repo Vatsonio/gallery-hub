@@ -145,7 +145,6 @@ export async function saveShareLinkDefaults(form: FormData): Promise<void> {
 export async function saveTelegramSettings(form: FormData): Promise<void> {
   const owner = await requireOwner();
   const section = "telegram";
-  const current = await loadSettings();
 
   const chat_id =
     typeof form.get("chat_id") === "string"
@@ -158,32 +157,26 @@ export async function saveTelegramSettings(form: FormData): Promise<void> {
     if (form.get(`event_${key}`) === "on") events.push(key);
   }
 
-  // F8: when TELEGRAM_BOT_TOKEN is set in the environment the worker
-  // already uses it as the source of truth — refuse to also persist a
-  // copy in app_settings (plaintext at rest) so a DB dump can't leak it.
+  // F25: the bot token is ENV-ONLY. The previous code persisted an
+  // operator-pasted token verbatim into the app_settings JSONB column
+  // (plaintext secret at rest, leaked by any DB dump) — and nothing in the
+  // dispatch/worker path ever read it (the worker uses
+  // process.env.TELEGRAM_BOT_TOKEN). We never store it now: reject a pasted
+  // token and direct the operator to the env var, and always write an empty
+  // bot_token so any historically-persisted secret is wiped on next save.
   const envTokenSet = (process.env.TELEGRAM_BOT_TOKEN ?? "").length > 0;
-  const replaceToken = form.get("replace_token") === "1";
   const incomingToken =
     typeof form.get("bot_token") === "string"
       ? (form.get("bot_token") as string).trim()
       : "";
-  let bot_token = envTokenSet ? "" : current.telegram.bot_token;
-  if (envTokenSet && incomingToken.length > 0) {
-    fail(section, "Token is set via TELEGRAM_BOT_TOKEN env var; clear it there");
+  if (incomingToken.length > 0) {
+    fail(section, "Set the bot token via the TELEGRAM_BOT_TOKEN env var, not here.");
   }
-  if (!envTokenSet && replaceToken) {
-    if (incomingToken.length === 0) {
-      fail(section, "Provide a token or cancel the replacement");
-    }
-    bot_token = incomingToken;
-  }
+  const bot_token = ""; // never persisted
 
-  // For the "enabled" precondition: prefer env over DB.
-  const effectiveTokenLen = envTokenSet
-    ? (process.env.TELEGRAM_BOT_TOKEN ?? "").length
-    : bot_token.length;
-  if (enabled && (effectiveTokenLen === 0 || chat_id.length === 0)) {
-    fail(section, "Token and chat id are required to enable Telegram");
+  // Enable precondition: the token must be present in the environment.
+  if (enabled && (!envTokenSet || chat_id.length === 0)) {
+    fail(section, "Set TELEGRAM_BOT_TOKEN (env) and a chat id to enable Telegram");
   }
 
   await saveSettings(
