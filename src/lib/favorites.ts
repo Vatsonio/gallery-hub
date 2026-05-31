@@ -26,10 +26,15 @@ export async function toggleFavoriteForViewer(
 }
 
 export async function listFavoritePhotoIds(token: string, viewerId: string): Promise<string[]> {
+  // F38: scope to photos that actually belong to the token's album by
+  // joining through share_links. Without this, a favorite injected for a
+  // foreign photo id (see F27) would surface here. The token→album_id
+  // mapping is 1:1, so this also self-heals any legacy polluted rows.
   const rows = await sql<{ photo_id: string }[]>`
     SELECT f.photo_id
     FROM favorites f
-    JOIN photos p ON p.id = f.photo_id
+    JOIN share_links sl ON sl.token = f.share_token
+    JOIN photos p ON p.id = f.photo_id AND p.album_id = sl.album_id
     WHERE f.share_token = ${token} AND f.viewer_id = ${viewerId}
     ORDER BY p.sort_order ASC, p.created_at ASC
   `;

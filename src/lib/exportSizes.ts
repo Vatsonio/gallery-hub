@@ -62,11 +62,15 @@ export async function computeExportSizes(
   albumId: string,
 ): Promise<ExportSizes> {
   const [fav, all] = await Promise.all([
+    // F38: scope the favorites aggregation to the token's album (join via
+    // share_links) so an injected foreign-photo favorite can't leak its
+    // orig_bytes/existence back through the export-size preview oracle.
     sql<{ count: string; bytes: string }[]>`
       SELECT COUNT(*)::text AS count,
              COALESCE(SUM(p.orig_bytes), 0)::text AS bytes
         FROM favorites f
-        JOIN photos p ON p.id = f.photo_id
+        JOIN share_links sl ON sl.token = f.share_token
+        JOIN photos p ON p.id = f.photo_id AND p.album_id = sl.album_id
        WHERE f.share_token = ${token} AND f.viewer_id = ${viewerId}
     `,
     sql<{ count: string; orig: string }[]>`

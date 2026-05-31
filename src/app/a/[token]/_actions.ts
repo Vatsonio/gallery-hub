@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import {
   resolveShareLinkStatus,
   unlockCookieName,
@@ -16,7 +16,17 @@ import { safeCapture } from "@/lib/analytics";
 import { notifyFavoritesBurst } from "@/lib/notifications";
 import { sql } from "@/lib/db";
 import { getAlbumById } from "@/lib/albums";
+import { createRateLimiter } from "@/lib/rateLimiter";
+import { resolveIpFromHeaders } from "@/lib/client-ip";
 import { randomUUID } from "node:crypto";
+
+// F29: brute-force guard for the share-link password gate. Admin login is
+// rate-limited but this path called verifyPassword (Argon2 ~200ms) with no
+// limiter — an attacker holding a leaked/forwarded token could grind the
+// gallery password. 10 attempts / minute per (token, IP). When proxy
+// headers are untrusted the IP collapses to "unknown", giving a per-token
+// global cap, which is still an effective brute-force ceiling.
+const unlockLimiter = createRateLimiter({ max: 10, windowMs: 60_000 });
 
 export interface ToggleFavoriteResult {
   favorited: boolean;
@@ -52,6 +62,21 @@ export async function toggleFavorite(
   const status = await resolveShareLinkStatus(token, unlocked);
   if (status.kind !== "ok") {
     throw new Error(`share link not accessible: ${status.kind}`);
+  }
+
+  // F27: verify the photo actually belongs to this token's album before
+  // touching the favorites table. toggleFavoriteForViewer does an
+  // unconditional INSERT whose FK only ties to photos(id), not the album —
+  // without this guard any valid token could favorite any photo UUID
+  // system-wide (cross-workspace favorite injection + a size/existence
+  // oracle via the export-size aggregation).
+  const inAlbum = await sql`
+    SELECT 1 FROM photos
+     WHERE id = ${photoId} AND album_id = ${status.link.album_id}
+     LIMIT 1
+  `;
+  if (inAlbum.length === 0) {
+    throw new Error("photo does not belong to this album");
   }
 
   const adminPreview = await isAdminPreview();
@@ -104,10 +129,12 @@ export async function toggleFavorite(
     if (album) {
       const countRows = await sql<{ n: string }[]>`
         SELECT COUNT(*)::text AS n
-          FROM favorites
-         WHERE share_token = ${token}
-           AND viewer_id = ${viewerId}
-           AND created_at > NOW() - INTERVAL '1 hour'
+          FROM favorites f
+          JOIN share_links sl ON sl.token = f.share_token
+          JOIN photos p ON p.id = f.photo_id AND p.album_id = sl.album_id
+         WHERE f.share_token = ${token}
+           AND f.viewer_id = ${viewerId}
+           AND f.created_at > NOW() - INTERVAL '1 hour'
       `.catch(() => [{ n: "0" }] as { n: string }[]);
       const count = Number(countRows[0]?.n ?? "0");
       void notifyFavoritesBurst({
@@ -133,11 +160,24 @@ export async function unlockShareLink(
   const password = String(formData.get("password") ?? "");
   if (!password) return { ok: false, error: "Enter a password." };
 
+  // Rate-limit BEFORE the expensive Argon2 verify so the limiter itself
+  // can't be turned into a CPU-exhaustion lever.
+  const hdrs = await headers();
+  const ip = resolveIpFromHeaders(hdrs);
+  if (!unlockLimiter.allow(`unlock|${token}|${ip}`)) {
+    return { ok: false, error: "Too many attempts. Try again in a minute." };
+  }
+
   const link = await loadShareLink(token);
-  if (!link) return { ok: false, error: "Link not found." };
-  if (!link.password_hash) {
-    // Already public — nothing to unlock; just succeed.
-    return { ok: true };
+  // F30/F29: collapse "link not found" into the same generic response as a
+  // wrong password so this action can't be used to enumerate which tokens
+  // exist / are password-protected.
+  if (!link || !link.password_hash) {
+    if (link && !link.password_hash) {
+      // Already public — nothing to unlock; succeed.
+      return { ok: true };
+    }
+    return { ok: false, error: "Incorrect password." };
   }
   const ok = await verifyPassword(link.password_hash, password);
   if (!ok) return { ok: false, error: "Incorrect password." };
@@ -147,7 +187,12 @@ export async function unlockShareLink(
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: `/a/${token}`,
+    // F13: path must be "/" — scoping to /a/${token} meant the browser
+    // never sent this cookie to /api/export/{token} or
+    // /api/viewer-context/{token}, so after a successful unlock downloads
+    // 401'd and favorites/heart hydration broke on every password-protected
+    // gallery. The HMAC value is token-bound, so widening the path is safe.
+    path: "/",
     maxAge: UNLOCK_TTL_SECONDS,
   });
   const viewerForCapture = jar.get(VIEWER_COOKIE)?.value ?? "anonymous";

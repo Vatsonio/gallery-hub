@@ -20,10 +20,30 @@ export interface RateLimiter {
  */
 export function createRateLimiter(opts: RateLimiterOpts): RateLimiter {
   const buckets = new Map<string, number[]>();
+  // F33: the previous implementation never deleted keys, so a hostile
+  // caller rotating the key component (a fresh email or UUID per request)
+  // grew this Map without bound for the process lifetime. We now (a) delete
+  // a key the moment its window empties, and (b) run a lazy O(n) sweep at
+  // most once per window to reclaim keys that were touched once and never
+  // revisited. Bounds live keys to "those seen within ~2 windows".
+  let lastSweep = Date.now();
+
+  function sweep(now: number, cutoff: number): void {
+    for (const [k, ts] of buckets) {
+      let live = false;
+      for (const t of ts) {
+        if (t > cutoff) { live = true; break; }
+      }
+      if (!live) buckets.delete(k);
+    }
+    lastSweep = now;
+  }
+
   return {
     allow(key) {
       const now = Date.now();
       const cutoff = now - opts.windowMs;
+      if (now - lastSweep > opts.windowMs) sweep(now, cutoff);
       const prior = buckets.get(key) ?? [];
       // Drop timestamps that have fallen out of the window.
       const hits: number[] = [];
