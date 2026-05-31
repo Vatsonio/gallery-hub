@@ -56,10 +56,33 @@ export function createFanOutZip(entries: AsyncIterable<ZipEntry>): FanOutZipHand
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") errored(err);
   });
 
-  // Fan-out: copy every byte archiver emits to BOTH passthroughs.
+  // Fan-out with real backpressure (F4). The previous handler wrote each
+  // chunk to both passthroughs and ignored the boolean return of write(),
+  // never pausing the archiver — so the slower of the two consumers (a
+  // trickling HTTP client vs the MinIO upload) let its passthrough buffer
+  // grow without bound, OOM-killing the process on a large export. We now
+  // pause the archiver whenever EITHER consumer signals it's full and only
+  // resume once BOTH have drained, bounding in-flight memory to the
+  // passthrough highWaterMarks and gating throughput on the slower side.
+  let httpReady = true;
+  let minioReady = true;
+  const maybeResume = (): void => {
+    if (httpReady && minioReady) archive.resume();
+  };
   archive.on("data", (chunk: Buffer) => {
-    toHttp.write(chunk);
-    toMinio.write(chunk);
+    const okHttp = toHttp.write(chunk);
+    const okMinio = toMinio.write(chunk);
+    if (!okHttp) httpReady = false;
+    if (!okMinio) minioReady = false;
+    if (!okHttp || !okMinio) archive.pause();
+  });
+  toHttp.on("drain", () => {
+    httpReady = true;
+    maybeResume();
+  });
+  toMinio.on("drain", () => {
+    minioReady = true;
+    maybeResume();
   });
   archive.on("end", () => {
     toHttp.end();

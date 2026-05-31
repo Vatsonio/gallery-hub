@@ -21,27 +21,52 @@ export function buildArchiveFilename(
 }
 
 /**
- * MinIO key for a cached export ZIP. Date stamp scopes the cache to a
- * single day so the reaper can prune yesterday's blobs without having to
- * read object metadata for every entry.
+ * MinIO key for a cached export ZIP. The content signature is folded into
+ * the key so the cache is content-addressed:
+ *   - F20: an `all`-scope export invalidates automatically when album
+ *     content changes (a different set/edit → a different sig → a
+ *     different key), instead of serving a stale same-day blob.
+ *   - F50: different viewers' favorites sets get distinct keys instead of
+ *     overwriting one shared per-token object (which made the cache thrash
+ *     and rarely hit for multi-viewer albums).
+ * The date stamp is retained so the reaper can prune by day.
  */
 export function buildCacheKey(
   token: string,
   scope: ExportScope,
   variant: ExportVariant,
+  signature: string,
   now: Date = new Date(),
 ): string {
   const ymd = now.toISOString().slice(0, 10);
-  return `exports/${token}/${scope}-${variant}-${ymd}.zip`;
+  const shortSig = signature.slice(0, 16);
+  return `exports/${token}/${scope}-${variant}-${shortSig}-${ymd}.zip`;
 }
 
 /**
- * Order-independent fingerprint of a favorites set. Stored as MinIO
- * object metadata so a same-day repeat request whose favorites set
- * changed (added/removed photos) misses the cache and regenerates.
+ * Order-independent fingerprint of a favorites set (legacy helper kept for
+ * tests / callers that only have ids). Prefer `contentSignature` for the
+ * export cache so photo edits invalidate it.
  */
 export function favoritesSignature(photoIds: string[]): string {
   if (photoIds.length === 0) return "empty";
   const sorted = [...photoIds].sort();
   return createHash("sha256").update(sorted.join("|")).digest("hex");
+}
+
+/**
+ * Order-independent, edit-sensitive fingerprint of an export's photo set.
+ * Includes `updated_at` (and sort_order) so adding/removing/editing/
+ * reordering photos changes the signature — which (folded into the cache
+ * key) makes the cached ZIP invalidate instead of serving stale content
+ * after a deletion or edit (F20).
+ */
+export function contentSignature(
+  items: { id: string; updated_at?: string | null; sort_order?: number | null }[],
+): string {
+  if (items.length === 0) return "empty";
+  const parts = items
+    .map((p) => `${p.id}:${p.updated_at ?? ""}:${p.sort_order ?? ""}`)
+    .sort();
+  return createHash("sha256").update(parts.join("|")).digest("hex");
 }

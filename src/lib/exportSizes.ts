@@ -24,7 +24,7 @@ export interface ExportSizes {
  * sample (1.8 GB originals → 380 MB web). Used purely for the modal
  * preview number; the actual archived bytes come from imgproxy itself.
  */
-const WEB_VARIANT_RATIO = 0.22;
+export const WEB_VARIANT_RATIO = 0.22;
 
 /**
  * Token-only export sizes — same shape as `computeExportSizes`, but the

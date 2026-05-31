@@ -15,16 +15,18 @@ import {
 import {
   buildArchiveFilename,
   buildCacheKey,
-  favoritesSignature,
+  contentSignature,
   type ExportScope,
   type ExportVariant,
 } from "@/lib/exportCache";
+import { WEB_VARIANT_RATIO } from "@/lib/exportSizes";
 import { createFanOutZip, type ZipEntry } from "@/lib/zipStream";
 import { variantKey } from "@/lib/keys";
 import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
 import { createRateLimiter } from "@/lib/rateLimiter";
+import { resolveIpFromHeaders } from "@/lib/client-ip";
 import { safeCapture } from "@/lib/analytics";
 import { notifyExportStarted, notifyExportCompleted } from "@/lib/notifications";
 import { getAlbumById } from "@/lib/albums";
@@ -41,6 +43,7 @@ export type ExportErrorReason =
   | "locked"
   | "download_disabled"
   | "rate_limited"
+  | "too_large"
   | "no_favorites"
   | "empty_album"
   | "admin_preview_no_favorites";
@@ -52,10 +55,20 @@ function errorBody(reason: ExportErrorReason, message: string): string {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Per-viewer leaky bucket. Module-level so it survives across requests in a
-// single Node worker. 6 starts in 60s is generous for the UI but blocks
-// pathological clients (e.g. infinite-redirect bots).
+// Leaky bucket, module-level so it survives across requests in a single
+// Node worker. 6 starts in 60s is generous for the UI but blocks
+// pathological clients. F21: keyed by a SERVER-trusted identity (token +
+// client IP) — the old `token|viewerId` key folded in a client-controlled
+// cookie that an attacker could drop/rotate to get a fresh bucket every
+// request, bypassing the limit entirely.
 const exportLimiter = createRateLimiter({ max: 6, windowMs: 60_000 });
+
+// F5: hard ceilings on a single export so a download-enabled share link
+// can't be turned into a resource-exhaustion lever (multi-GB ZIP, minutes
+// of open MinIO upload, and — combined with F4 — heap pressure). Overridable
+// via env for operators with genuinely huge albums.
+const MAX_EXPORT_PHOTOS = Number(process.env.MAX_EXPORT_PHOTOS ?? "5000");
+const MAX_EXPORT_BYTES = Number(process.env.MAX_EXPORT_BYTES ?? String(25 * 1_000_000_000));
 
 function deriveExtFromFilename(filename: string): string {
   const dot = filename.lastIndexOf(".");
@@ -128,21 +141,14 @@ export async function GET(
   // Validate share link via the shared status resolver (handles expired/locked).
   const unlocked = jar.get(unlockCookieName(token))?.value ?? null;
   const status = await resolveShareLinkStatus(token, unlocked);
-  if (status.kind === "not_found") {
-    return new NextResponse(errorBody("not_found", "This share link no longer exists."), {
+  // F30: collapse not_found / expired / locked into ONE generic 404 for the
+  // pre-unlock path. The previous distinct codes (404 / 410 / 401) let an
+  // unauthenticated caller fingerprint which tokens exist, which are expired,
+  // and which are password-protected — before any password gate. This matches
+  // the deliberately-collapsed viewer-context route.
+  if (status.kind === "not_found" || status.kind === "expired" || status.kind === "locked") {
+    return new NextResponse(errorBody("not_found", "This share link is not available."), {
       status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  if (status.kind === "expired") {
-    return new NextResponse(errorBody("expired", "This share link has expired."), {
-      status: 410,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  if (status.kind === "locked") {
-    return new NextResponse(errorBody("locked", "Unlock the gallery to export photos."), {
-      status: 401,
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -176,7 +182,8 @@ export async function GET(
   // and quick (it runs every modal open), so subjecting it to the same
   // bucket would mean clicking the dock twice in 30s could shadow-ban
   // the legitimate download that follows.
-  if (!probe && !exportLimiter.allow(`${token}|${viewerId}`)) {
+  const clientIp = resolveIpFromHeaders(req.headers);
+  if (!probe && !exportLimiter.allow(`${token}|${clientIp}`)) {
     return new NextResponse(
       errorBody("rate_limited", "Too many download attempts. Please wait a minute."),
       {
@@ -230,6 +237,31 @@ export async function GET(
     });
   }
 
+  // F5: enforce size/count ceilings before building (or OK-ing a probe).
+  // The `all` scope was previously unbounded — a huge album produced a
+  // tens-of-GB ZIP that held an open MinIO upload for minutes and (with F4)
+  // pressured the heap. Any visitor of a download-enabled link could trigger
+  // it repeatedly. We compute the byte total here (also reused for logging
+  // below, replacing the old post-build query).
+  if (photos.length > MAX_EXPORT_PHOTOS) {
+    return new NextResponse(
+      errorBody("too_large", `This export exceeds the ${MAX_EXPORT_PHOTOS}-photo limit.`),
+      { status: 413, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  const sizeRow = await sql<{ total: string | null }[]>`
+    SELECT COALESCE(SUM(orig_bytes), 0)::text AS total
+      FROM photos
+     WHERE id = ANY(${photos.map((p) => p.id)}::uuid[])
+  `;
+  const totalOrigBytes = Number(sizeRow[0]?.total ?? 0);
+  if (totalOrigBytes > MAX_EXPORT_BYTES) {
+    return new NextResponse(
+      errorBody("too_large", "This export is too large to download in one archive."),
+      { status: 413, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   // Probe mode: photo set is non-empty and all preconditions passed.
   // Short-circuit before any side effects — the client now knows the
   // real download will succeed and will trigger it via a normal
@@ -259,45 +291,48 @@ export async function GET(
     });
   }
 
-  const sig = scope === "favorites" ? favoritesSignature(photos.map((p) => p.id)) : "all";
-  const cacheKey = buildCacheKey(token, scope, variant, new Date());
+  // Content-addressed signature for BOTH scopes (F20/F50): includes each
+  // photo's updated_at so edits/deletions invalidate the cache, and it's
+  // folded into the key so different favorites sets don't overwrite each
+  // other's cached ZIP.
+  const sig = contentSignature(photos);
+  const cacheKey = buildCacheKey(token, scope, variant, sig, new Date());
 
   const archiveName = buildArchiveFilename(albumForNotify?.slug, scope);
 
-  // Cache lookup. Same-day signature match → presigned redirect.
+  // Cache lookup. The key is content-addressed (it encodes `sig`), so an
+  // object existing AT this key is guaranteed to be the right content —
+  // no metadata comparison needed. A miss (HEAD throws) falls through.
   try {
     const head = await headObject(cacheKey);
-    const cachedSig = head.Metadata?.["favorites_signature"];
-    if (cachedSig === sig) {
-      const presigned = await getPresignedUrl(cacheKey, 3600, undefined, {
-        responseContentDisposition: `attachment; filename="${archiveName}"`,
+    const presigned = await getPresignedUrl(cacheKey, 3600, undefined, {
+      responseContentDisposition: `attachment; filename="${archiveName}"`,
+    });
+    const cachedBytes = head.ContentLength ?? 0;
+    await logExport(token, viewerId, scope, variant, cachedBytes);
+    safeCapture({
+      distinctId: viewerId,
+      event: "export_completed",
+      properties: {
+        share_token: token,
+        scope,
+        variant,
+        total_bytes: cachedBytes,
+        cache_hit: true,
+      },
+    });
+    if (albumForNotify) {
+      void notifyExportCompleted({
+        album_title: albumForNotify.title,
+        share_token: token,
+        viewer_id: viewerId,
+        scope,
+        variant,
+        total_bytes: cachedBytes,
+        cache_hit: true,
       });
-      const cachedBytes = head.ContentLength ?? 0;
-      await logExport(token, viewerId, scope, variant, cachedBytes);
-      safeCapture({
-        distinctId: viewerId,
-        event: "export_completed",
-        properties: {
-          share_token: token,
-          scope,
-          variant,
-          total_bytes: cachedBytes,
-          cache_hit: true,
-        },
-      });
-      if (albumForNotify) {
-        void notifyExportCompleted({
-          album_title: albumForNotify.title,
-          share_token: token,
-          viewer_id: viewerId,
-          scope,
-          variant,
-          total_bytes: cachedBytes,
-          cache_hit: true,
-        });
-      }
-      return NextResponse.redirect(presigned, 302);
     }
+    return NextResponse.redirect(presigned, 302);
   } catch {
     // miss — fall through to fresh build
   }
@@ -331,6 +366,11 @@ export async function GET(
             accept: "image/jpeg",
             "user-agent": "gallery-hub-export/1",
           },
+          // F53: bound each render. Without a timeout a single wedged
+          // imgproxy fetch never resolves and stalls the archiver, the HTTP
+          // response AND the background MinIO upload indefinitely. Mirrors
+          // the 30s timeout warmImgproxyVariants already uses.
+          signal: AbortSignal.timeout(30_000),
         });
         if (!res.ok || !res.body) {
           throw new Error(
@@ -366,7 +406,7 @@ export async function GET(
       Body: toMinio,
       ContentType: "application/zip",
       Metadata: {
-        favorites_signature: sig,
+        content_signature: sig,
         scope,
         variant,
       },
@@ -379,15 +419,15 @@ export async function GET(
     console.error("[export] archive build failed", err);
   });
 
-  // Byte total — always orig_bytes now that imgproxy resizes everything
-  // on demand. The legacy `large_bytes` column is preserved for rollback
-  // visibility but no longer used by the export path.
-  const sizeRow = await sql<{ total: string | null }[]>`
-    SELECT COALESCE(SUM(orig_bytes), 0)::text AS total
-      FROM photos
-     WHERE id = ANY(${photos.map((p) => p.id)}::uuid[])
-  `;
-  const totalBytes = Number(sizeRow[0]?.total ?? 0);
+  // Byte total for logging/analytics/notifications. Reuse the sum computed
+  // for the F5 cap above instead of re-querying. F51: the `web` variant
+  // streams imgproxy-re-encoded JPEGs (~22% of originals), so reporting the
+  // raw orig_bytes overstated it ~4-5x; apply the same ratio the modal
+  // preview uses so miss-path reporting roughly matches the cache-hit path
+  // (which logs the real ContentLength).
+  const totalBytes = variant === "web"
+    ? Math.round(totalOrigBytes * WEB_VARIANT_RATIO)
+    : totalOrigBytes;
   await logExport(token, viewerId, scope, variant, totalBytes);
   safeCapture({
     distinctId: viewerId,
