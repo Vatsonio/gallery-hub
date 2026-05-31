@@ -35,14 +35,23 @@ function slugify(input: string): string {
     .slice(0, 60);
 }
 
-async function uniqueSlugForOwner(base: string, ownerUserId: string): Promise<string> {
+/**
+ * Generate a GLOBALLY-unique slug (F11). Migration 021 relaxed slug
+ * uniqueness to per-(owner, slug) so two admins could both use
+ * "summer-2026". But admin album routes address albums by bare slug, and
+ * the owner-role lookup resolves a slug across ALL workspaces — so a
+ * cross-workspace slug collision let the owner view/edit/delete the wrong
+ * admin's album. Generating slugs globally unique removes the ambiguity at
+ * the source (with the number-suffix fallback an admin simply gets
+ * "summer-2026-2"); the per-owner unique index from 021 remains as a
+ * DB-level safety net. Slugs were globally unique before 021, so existing
+ * rows are already collision-free.
+ */
+async function uniqueGlobalSlug(base: string): Promise<string> {
   const root = slugify(base) || "album";
   for (let i = 0; i < 20; i++) {
     const candidate = i === 0 ? root : `${root}-${i + 1}`;
-    const rows = await sql`
-      SELECT 1 FROM albums
-       WHERE slug = ${candidate} AND owner_user_id = ${ownerUserId}
-       LIMIT 1`;
+    const rows = await sql`SELECT 1 FROM albums WHERE slug = ${candidate} LIMIT 1`;
     if (rows.length === 0) return candidate;
   }
   return `${root}-${randomUUID().slice(0, 6)}`;
@@ -58,7 +67,7 @@ export interface CreateAlbumInput {
 
 export async function createAlbum(input: CreateAlbumInput): Promise<AlbumRow> {
   const id = randomUUID();
-  const slug = await uniqueSlugForOwner(input.title, input.ownerUserId);
+  const slug = await uniqueGlobalSlug(input.title);
   const rows = await sql<AlbumRow[]>`
     INSERT INTO albums (id, slug, title, subtitle, status, owner_user_id)
     VALUES (${id}, ${slug}, ${input.title}, ${input.subtitle}, ${input.status}, ${input.ownerUserId})
@@ -314,43 +323,49 @@ export async function insertPhotosBatch(inputs: InsertPhotoInput[]): Promise<Pho
   for (const i of inputs) {
     if (i.album_id !== albumId) throw new Error("insertPhotosBatch: mixed album_id not supported");
   }
-  // Resolve the starting sort_order once per batch. Outside a transaction
-  // this is racy against a concurrent insert into the same album, but the
-  // finalize route is the only writer and it runs serially per request.
-  const maxRows = await sql<{ next: number }[]>`
-    SELECT COALESCE(MAX(sort_order) + 1, 0)::int AS next FROM photos WHERE album_id = ${albumId}`;
-  const base = maxRows[0]?.next ?? 0;
-  const rows: Record<string, unknown>[] = inputs.map((p, i) => ({
-    id: p.id,
-    album_id: p.album_id,
-    filename: p.filename,
-    width: p.width,
-    height: p.height,
-    orig_bytes: p.orig_bytes,
-    sort_order: base + i,
-    taken_at: p.taken_at,
-    status: "processing",
-    created_by_user_id: p.created_by_user_id ?? null,
-  }));
-  // postgres.js sql(rows, ...cols) expands to a multi-row VALUES literal,
-  // then RETURNING * gives us the inserted PhotoRows in insertion order.
-  // Cast through `as never` because the typed overload of the helper
-  // doesn't play well with our mixed value types — runtime is correct.
-  return sql<PhotoRow[]>`
-    INSERT INTO photos ${sql(
-      rows,
-      "id",
-      "album_id",
-      "filename",
-      "width",
-      "height",
-      "orig_bytes",
-      "sort_order",
-      "taken_at",
-      "status",
-      "created_by_user_id",
-    ) as never}
-    RETURNING *`;
+  // F43: compute the starting sort_order and INSERT in ONE transaction,
+  // serialized on the album row (FOR UPDATE). The previous code read
+  // MAX(sort_order)+1 in a standalone statement, so two concurrent
+  // finalize calls for the same album (e.g. a double-click) both read the
+  // same base and assigned overlapping sort_order values. Locking the
+  // album row makes the read+insert atomic per album.
+  return sql.begin(async (tx) => {
+    await tx`SELECT 1 FROM albums WHERE id = ${albumId} FOR UPDATE`;
+    const maxRows = await tx<{ next: number }[]>`
+      SELECT COALESCE(MAX(sort_order) + 1, 0)::int AS next FROM photos WHERE album_id = ${albumId}`;
+    const base = maxRows[0]?.next ?? 0;
+    const rows: Record<string, unknown>[] = inputs.map((p, i) => ({
+      id: p.id,
+      album_id: p.album_id,
+      filename: p.filename,
+      width: p.width,
+      height: p.height,
+      orig_bytes: p.orig_bytes,
+      sort_order: base + i,
+      taken_at: p.taken_at,
+      status: "processing",
+      created_by_user_id: p.created_by_user_id ?? null,
+    }));
+    // postgres.js sql(rows, ...cols) expands to a multi-row VALUES literal,
+    // then RETURNING * gives us the inserted PhotoRows in insertion order.
+    // Cast through `as never` because the typed overload of the helper
+    // doesn't play well with our mixed value types — runtime is correct.
+    return tx<PhotoRow[]>`
+      INSERT INTO photos ${tx(
+        rows,
+        "id",
+        "album_id",
+        "filename",
+        "width",
+        "height",
+        "orig_bytes",
+        "sort_order",
+        "taken_at",
+        "status",
+        "created_by_user_id",
+      ) as never}
+      RETURNING *`;
+  }) as Promise<PhotoRow[]>;
 }
 
 export async function listPhotos(albumId: string): Promise<PhotoRow[]> {
@@ -359,7 +374,19 @@ export async function listPhotos(albumId: string): Promise<PhotoRow[]> {
 }
 
 export async function setCover(albumId: string, photoId: string): Promise<void> {
-  await sql`UPDATE albums SET cover_photo_id = ${photoId}, updated_at = now() WHERE id = ${albumId}`;
+  // F35/F44: only accept a photo that actually belongs to this album.
+  // gateAlbum() upstream confirms the caller owns the album, but photoId
+  // was never validated against it — a crafted call could point
+  // cover_photo_id at a photo in another workspace (dangling/cross-album
+  // cover pointer). The EXISTS guard makes a mismatched photo a no-op;
+  // callers treat zero rows as an error via the affected-rows count.
+  const res = await sql`
+    UPDATE albums SET cover_photo_id = ${photoId}, updated_at = now()
+     WHERE id = ${albumId}
+       AND EXISTS (SELECT 1 FROM photos WHERE id = ${photoId} AND album_id = ${albumId})`;
+  if (res.count === 0) {
+    throw new Error("setCover: photo does not belong to the album");
+  }
 }
 
 export async function reorderPhotos(albumId: string, orderedIds: string[]): Promise<void> {

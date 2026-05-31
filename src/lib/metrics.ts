@@ -265,11 +265,13 @@ interface AlbumStorageRow {
 }
 
 /**
- * Per-album storage usage + best-guess "whose album" attribution. The
- * uploader column lives on `photos.created_by_user_id` (added in
- * migration 020) so albums that predate the migration return
- * `top_uploader = null`. We surface the uploader's email — fits the
- * existing /admin/metrics density.
+ * Per-album storage usage + workspace attribution. F36: attribution now
+ * derives from `albums.owner_user_id` (the authoritative "whose album"
+ * since the workspace split in migration 021), NOT a per-photo
+ * `created_by_user_id` heuristic — the latter could label an album
+ * "uploaded by B" after the owner moved B's photos into A's album. The
+ * field keeps the `top_uploader` name for the existing /admin/metrics
+ * consumer but is the album owner's email.
  */
 export async function getAlbumStorageBreakdown(limit = 20): Promise<AlbumStorageBreakdown[]> {
   const rows = await sql<AlbumStorageRow[]>`
@@ -277,20 +279,12 @@ export async function getAlbumStorageBreakdown(limit = 20): Promise<AlbumStorage
       a.id, a.slug, a.title,
       COALESCE(SUM(p.orig_bytes), 0)::bigint AS bytes,
       COUNT(p.id)::bigint                    AS photos,
-      (
-        SELECT u.email
-          FROM photos p2
-          LEFT JOIN admin_users u ON u.id = p2.created_by_user_id
-         WHERE p2.album_id = a.id
-           AND p2.created_by_user_id IS NOT NULL
-         GROUP BY u.email
-         ORDER BY COUNT(*) DESC
-         LIMIT 1
-      ) AS top_uploader
+      owner.email                            AS top_uploader
     FROM albums a
+    LEFT JOIN admin_users owner ON owner.id = a.owner_user_id
     LEFT JOIN photos p ON p.album_id = a.id AND p.status IN ('ready', 'processing')
     WHERE a.deleted_at IS NULL
-    GROUP BY a.id, a.slug, a.title
+    GROUP BY a.id, a.slug, a.title, owner.email
     ORDER BY bytes DESC, photos DESC, a.created_at DESC
     LIMIT ${limit}
   `;
