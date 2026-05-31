@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, FileImage, Heart, ImageIcon, Loader2, X, type LucideIcon } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 
@@ -124,17 +124,23 @@ export default function ExportModal({
   const [selected, setSelected] = useState<ExportOptionId | undefined>(initial);
   const [submitting, setSubmitting] = useState(false);
 
-  // Reset selection whenever the modal opens so a stale id doesn't survive
-  // option-list changes (e.g. after the favorites set shifts). Honor the
-  // caller's preselect when valid.
+  // F46: reset the selection ONLY on the open transition. The previous
+  // effect also re-ran whenever `options`/`firstEnabled` changed identity —
+  // and the parent rebuilds `options` via useMemo keyed on
+  // [exportSizes, liveFavoritesCount], whose identity flips when viewer
+  // hydration lands. That could wipe the user's pick (and the probe/download
+  // target) mid-interaction while the modal was open. Guard on the
+  // closed→open edge so in-flight option churn no longer resets the choice.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       const target =
         preselect && options.some((o) => o.id === preselect && !o.disabled)
           ? preselect
           : firstEnabled;
       setSelected(target);
     }
+    wasOpen.current = open;
   }, [open, firstEnabled, preselect, options]);
 
   // Esc-to-close.

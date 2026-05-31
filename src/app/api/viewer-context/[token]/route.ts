@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies, headers } from "next/headers";
+import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
 import {
   resolveShareLinkStatus,
@@ -78,10 +79,30 @@ export async function GET(
   const adminSession = await requireAdminSessionFromCookies().catch(() => ({
     ok: false as const,
   }));
+  // F18: only the real admin-preview session maps to the sentinel. A
+  // cookieless NON-admin visitor (privacy mode, cookie blockers, a direct
+  // API hit) used to also collapse onto ADMIN_PREVIEW_VIEWER_ID, which then
+  // skipped ALL view tracking below and made every cookieless visitor share
+  // one id — silently corrupting per-viewer analytics. Mint a fresh
+  // anonymous id and set the cookie (route handlers may set cookies) so the
+  // visitor is tracked as a distinct viewer.
   const isAdminPreview = adminSession.ok;
-  const viewerId = isAdminPreview
-    ? ADMIN_PREVIEW_VIEWER_ID
-    : (jar.get(VIEWER_COOKIE)?.value ?? ADMIN_PREVIEW_VIEWER_ID);
+  let viewerId: string;
+  if (isAdminPreview) {
+    viewerId = ADMIN_PREVIEW_VIEWER_ID;
+  } else {
+    viewerId = jar.get(VIEWER_COOKIE)?.value ?? "";
+    if (!viewerId) {
+      viewerId = randomUUID();
+      jar.set(VIEWER_COOKIE, viewerId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
+  }
 
   const [favoriteIds, exportSizes] = await Promise.all([
     listFavoritePhotoIds(token, viewerId),

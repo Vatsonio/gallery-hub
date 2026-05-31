@@ -126,6 +126,12 @@ export default function PhotoTile({
   const [loaded, setLoaded] = useState(false);
   const [, startTransition] = useTransition();
   const inflight = useRef(false);
+  // F15: the latest intent the user expressed, and the last server-confirmed
+  // state. The in-flight toggle loop drives the server toward `desiredFav`
+  // (handling a re-tap that arrives mid-flight instead of dropping it), and
+  // `confirmedFav` is the rollback target on error.
+  const desiredFav = useRef(initialFavorited);
+  const confirmedFav = useRef(initialFavorited);
   const pendingNavTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTouchTapAt = useRef(0);
   // Desktop equivalent of lastTouchTapAt. The browser's native dblclick
@@ -155,6 +161,11 @@ export default function PhotoTile({
   useEffect(() => {
     if (favoritedIds === null) return;
     const next = favoritedIds.has(photoId);
+    // Hydration is server truth — record it as the confirmed baseline. Don't
+    // clobber an in-flight optimistic toggle (align desired only when idle).
+    confirmedFav.current = next;
+    if (inflight.current) return;
+    desiredFav.current = next;
     setFavorited((cur) => (cur === next ? cur : next));
   }, [favoritedIds, photoId]);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -244,29 +255,52 @@ export default function PhotoTile({
   }
 
   function commitToggle(intent: boolean): void {
-    // Optimistic update; reconcile with server response.
-    const prev = favorited;
-    const shownDelta = intent === prev ? 0 : intent ? 1 : -1;
+    // Optimistic UI reflects the newest intent immediately. `favorited` is
+    // the currently-shown state (React re-renders between physical taps, so
+    // the closure stays fresh); re-tapping the same direction is a no-op
+    // delta.
+    const prevShown = favorited;
+    const shownDelta = intent === prevShown ? 0 : intent ? 1 : -1;
     setFavorited(intent);
     toggleFavoritedId(photoId, intent);
     if (shownDelta !== 0) bumpFavoritesCount(shownDelta);
     if (intent) setBurst((b) => b + 1);
+
+    desiredFav.current = intent;
+    // F15: a toggle issued while a request is in flight is no longer dropped
+    // — the running loop reads `desiredFav` and reconciles to it, so the
+    // first response can't clobber the newer intent.
     if (inflight.current) return;
     inflight.current = true;
     startTransition(async () => {
       try {
-        const res = await toggleFavorite(token, photoId);
-        setFavorited(res.favorited);
-        toggleFavoritedId(photoId, res.favorited);
-        // Reconcile against the optimistic display. `truthDelta` is what
-        // the count *should* have moved by from `prev`; if it disagrees
-        // with the optimistic `shownDelta`, apply the difference.
-        const truthDelta = res.favorited === prev ? 0 : res.favorited ? 1 : -1;
-        if (truthDelta !== shownDelta) bumpFavoritesCount(truthDelta - shownDelta);
+        // toggleFavorite FLIPS the server state and returns the new value.
+        // Drive it toward the latest desired state using the real returned
+        // value (never a guess); a guard bounds pathological loops.
+        let serverState = confirmedFav.current;
+        let guard = 0;
+        while (serverState !== desiredFav.current && guard < 4) {
+          const res = await toggleFavorite(token, photoId);
+          serverState = res.favorited;
+          guard += 1;
+        }
+        confirmedFav.current = serverState;
+        setFavorited(serverState);
+        toggleFavoritedId(photoId, serverState);
+        // The optimistic badge already reflects `desiredFav`; correct it only
+        // if the server ended up elsewhere (guard exhausted).
+        if (serverState !== desiredFav.current) {
+          const corr = (serverState ? 1 : 0) - (desiredFav.current ? 1 : 0);
+          if (corr !== 0) bumpFavoritesCount(corr);
+        }
       } catch {
-        setFavorited(prev);
-        toggleFavoritedId(photoId, prev);
-        if (shownDelta !== 0) bumpFavoritesCount(-shownDelta);
+        // Roll the UI + badge back to the last server-confirmed state.
+        const target = confirmedFav.current;
+        const corr = (target ? 1 : 0) - (desiredFav.current ? 1 : 0);
+        if (corr !== 0) bumpFavoritesCount(corr);
+        desiredFav.current = target;
+        setFavorited(target);
+        toggleFavoritedId(photoId, target);
       } finally {
         inflight.current = false;
       }

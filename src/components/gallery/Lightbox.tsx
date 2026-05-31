@@ -65,9 +65,16 @@ export default function Lightbox({
   const [infoOpen, setInfoOpen] = useState(false);
   const [, startTransition] = useTransition();
   const inflight = useRef(false);
+  // F16: latest intent + last server-confirmed state, so a re-tap during an
+  // in-flight request isn't dropped and the rollback target is the real
+  // previous value (not `!intent`).
+  const desiredFav = useRef(initialFavorited);
+  const confirmedFav = useRef(initialFavorited);
 
   useEffect(() => {
     setFavorited(initialFavorited);
+    desiredFav.current = initialFavorited;
+    confirmedFav.current = initialFavorited;
   }, [initialFavorited, photoId]);
 
   useEffect(() => {
@@ -90,14 +97,30 @@ export default function Lightbox({
   function commitToggle(intent: boolean) {
     setFavorited(intent);
     if (intent) setBurst((b) => b + 1);
+    desiredFav.current = intent;
+    // F16: don't drop a re-tap that arrives mid-flight — the loop reconciles
+    // to the latest desired state instead of letting the first response
+    // clobber it.
     if (inflight.current) return;
     inflight.current = true;
     startTransition(async () => {
       try {
-        const res = await toggleFavorite(token, photoId);
-        setFavorited(res.favorited);
+        // toggleFavorite flips and returns the new server state; drive it to
+        // the latest desired value using the real returned value.
+        let serverState = confirmedFav.current;
+        let guard = 0;
+        while (serverState !== desiredFav.current && guard < 4) {
+          const res = await toggleFavorite(token, photoId);
+          serverState = res.favorited;
+          guard += 1;
+        }
+        confirmedFav.current = serverState;
+        setFavorited(serverState);
       } catch {
-        setFavorited(!intent);
+        // Roll back to the last server-confirmed state (not `!intent`, which
+        // wrongly emptied the heart on a re-favorite network error).
+        desiredFav.current = confirmedFav.current;
+        setFavorited(confirmedFav.current);
       } finally {
         inflight.current = false;
       }

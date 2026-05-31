@@ -36,12 +36,22 @@ export function BulkActionsBar({ albumId, selectedIds, onClear, onCommitted }: P
   const [err, setErr] = useState<string | null>(null);
   const count = selectedIds.length;
 
+  // F48: refetch the album list every time the move dialog opens, and clear
+  // it on close. The previous guard (`|| albums`) cached the list for the
+  // component's lifetime, so a newly-created album never appeared as a move
+  // target without a remount.
   useEffect(() => {
-    if (!moveOpen || albums) return;
+    if (!moveOpen) {
+      setAlbums(null);
+      setErr(null);
+      return;
+    }
+    let cancelled = false;
     listAlbumsForPickerAction()
-      .then(setAlbums)
-      .catch((e: unknown) => setErr((e as Error).message));
-  }, [moveOpen, albums]);
+      .then((a) => { if (!cancelled) setAlbums(a); })
+      .catch((e: unknown) => { if (!cancelled) setErr((e as Error).message); });
+    return () => { cancelled = true; };
+  }, [moveOpen]);
 
   if (count === 0) return null;
 

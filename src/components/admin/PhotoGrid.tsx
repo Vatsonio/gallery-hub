@@ -62,6 +62,10 @@ export function PhotoGrid({
   // tile ~6 px taller than its wrapper — pushing the bottom-right
   // MoreVertical button below the cell.
   const roRef = useRef<ResizeObserver | null>(null);
+  // F45: set while an optimistic drag-reorder is committing, so the 2s
+  // processing poll doesn't replace `order` from the server mid-flight and
+  // snap the dragged tile back.
+  const reorderingRef = useRef(false);
   const containerRef = useCallback((node: HTMLDivElement | null) => {
     roRef.current?.disconnect();
     roRef.current = null;
@@ -105,7 +109,10 @@ export function PhotoGrid({
     const anyProcessing = data.photos.some((p) => p.status !== "ready");
     if (anyProcessing) {
       if (!hadPending) setHadPending(true);
-      const t = setInterval(reload, 2000);
+      const t = setInterval(() => {
+        // Don't clobber an in-flight optimistic reorder (F45).
+        if (!reorderingRef.current) void reload();
+      }, 2000);
       return () => clearInterval(t);
     }
     if (hadPending) {
@@ -121,10 +128,13 @@ export function PhotoGrid({
     const prev = order;
     const next = arrayMove(order, oldIdx, newIdx);
     setOrder(next); // optimistic
+    reorderingRef.current = true;
     try {
       await reorderPhotosAction(data.album.id, next);
     } catch {
       setOrder(prev); // revert on server error
+    } finally {
+      reorderingRef.current = false;
     }
   }
 
@@ -183,6 +193,11 @@ export function PhotoGrid({
       }];
     });
   }, [data, order, byId]);
+
+  // F47: lookup map so the per-row render is O(1) per tile instead of
+  // tiles.find() (O(n) → O(n²) across the grid, re-run on every
+  // ResizeObserver width change).
+  const tilesById = useMemo(() => new Map(tiles.map((t) => [t.id, t])), [tiles]);
 
   // Justified-row layout — same engine as the public gallery view. Photos
   // in each row scale together to fill 100% of width, so heights inside a
@@ -327,7 +342,7 @@ export function PhotoGrid({
                   }}
                 >
                   {row.items.map((item) => {
-                    const tile = tiles.find((t) => t.id === item.id);
+                    const tile = tilesById.get(item.id);
                     if (!tile) return null;
                     return (
                       <div
