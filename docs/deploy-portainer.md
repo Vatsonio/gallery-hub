@@ -87,6 +87,25 @@ Full reference: `.env.prod.example`.
 | `TELEGRAM_CHAT_ID` | Default Telegram chat id for notifications (can be overridden in `/admin/settings`). |
 | `NEXT_PUBLIC_PH_SESSION_REPLAY` | `1` to re-enable PostHog session replay (off by default — it records visitor screens). |
 | `MAX_EXPORT_PHOTOS` / `MAX_EXPORT_BYTES` | Override the export size ceilings (defaults 5000 photos / 25 GB). |
+| `LOG_LEVEL` | App/worker log level: `trace`/`debug`/`info`/`warn`/`error` (default `info` in prod). Structured JSON logs (pino) go to stdout. |
+
+## Logs (Dozzle)
+
+The stack includes **Dozzle** (`gallery-dozzle`) — one web UI with live tail +
+search of every container's logs, so you don't `docker logs <name>` per
+service. It reads the Docker socket read-only and is filtered to the
+`gallery-` containers.
+
+It binds to **127.0.0.1:9990** on the host (not public — the logs can contain
+IPs/errors). Reach it via an SSH tunnel from your machine:
+
+```bash
+ssh -N -L 9990:127.0.0.1:9990 user@<proxmox-host>
+# then open http://localhost:9990
+```
+
+For LAN/remote access put it behind Cloudflare Access, or enable Dozzle's
+built-in auth (`DOZZLE_AUTH_PROVIDER=simple` + a users file — see Dozzle docs).
 
 ## Updates
 

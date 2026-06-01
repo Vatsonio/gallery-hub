@@ -209,6 +209,29 @@ services:
     networks:
       - gallery-internal
 
+  # Centralised log viewer — live tail + search of EVERY container in this
+  # stack from one web UI, so you don't `docker logs <name>` per container.
+  # Reads the Docker socket read-only (logs only). SECURITY: this UI exposes
+  # all container logs (which may contain IPs / errors) — do NOT expose it
+  # publicly. It binds to the host loopback (127.0.0.1:9990); reach it over
+  # the LAN via an SSH tunnel, or put it behind Cloudflare Access. Built-in
+  # auth: set DOZZLE_AUTH_PROVIDER=simple with a users file (see Dozzle docs).
+  gallery-dozzle:
+    image: amir20/dozzle:latest
+    container_name: gallery-dozzle
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+      # Show only this stack's containers (matches the gallery- name prefix).
+      DOZZLE_FILTER: "name=gallery-"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:9990:8080"
+    networks:
+      - gallery-internal
+
 volumes:
   gallery_pgdata:
   gallery_miniodata:
