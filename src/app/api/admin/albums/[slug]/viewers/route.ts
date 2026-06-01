@@ -7,8 +7,12 @@ import { sql } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// NOTE: the dynamic segment is named `slug` to match the sibling routes
+// (warm, photos, processing-status) — Next.js forbids two different param
+// names at the same path level. The value passed here is actually the album
+// id (the metrics drill-down has the id), which we use directly.
 interface Ctx {
-  params: Promise<{ id: string }>;
+  params: Promise<{ slug: string }>;
 }
 
 /**
@@ -25,7 +29,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const { id: albumId } = await ctx.params;
+  const { slug: albumId } = await ctx.params;
   const url = new URL(req.url);
   const daysRaw = Number(url.searchParams.get("days") ?? "30");
   const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(365, Math.floor(daysRaw))) : 30;
