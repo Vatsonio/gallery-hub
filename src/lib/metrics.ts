@@ -318,6 +318,102 @@ export async function getRecentExports(limit = 20): Promise<RecentExport[]> {
   }));
 }
 
+export interface AlbumViewerRow {
+  ip: string;
+  /** Country captured at view/unlock time (Cloudflare cf-ipcountry). The
+   *  API layer overrides this with the GeoIP DB value when available. */
+  country: string | null;
+  city: string | null;
+  region: string | null;
+  view_count: number;
+  viewers: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  unlock_ok: number;
+  unlock_fail: number;
+}
+
+interface AlbumViewerDbRow {
+  ip: string;
+  country: string | null;
+  view_count: bigint | string | null;
+  viewers: bigint | string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  unlock_ok: bigint | string | null;
+  unlock_fail: bigint | string | null;
+}
+
+/**
+ * Per-IP breakdown of who touched an album over the last `days`: page-view
+ * counts + distinct viewers + first/last seen, joined with password-gate
+ * attempts (success/fail). One row per IP that either viewed the album or
+ * tried its password. city/region are left null here and enriched from the
+ * GeoIP DB at the API layer (lookupGeoBatch). Owner-only data — the only
+ * caller is the owner-gated /admin/metrics drill-down.
+ */
+export async function getAlbumViewersDetail(albumId: string, days = 30): Promise<AlbumViewerRow[]> {
+  const rows = await sql<AlbumViewerDbRow[]>`
+    WITH toks AS (
+      SELECT token FROM share_links WHERE album_id = ${albumId}
+    ),
+    views AS (
+      SELECT ip,
+             MAX(country) AS country,
+             COUNT(*) AS view_count,
+             COUNT(DISTINCT viewer_id) AS viewers,
+             MIN(created_at) AS first_seen,
+             MAX(created_at) AS last_seen
+        FROM view_events
+       WHERE share_token IN (SELECT token FROM toks)
+         AND event_type = 'page_view'
+         AND ip IS NOT NULL
+         AND created_at > now() - (${days}::int * interval '1 day')
+       GROUP BY ip
+    ),
+    unlocks AS (
+      SELECT ip,
+             MAX(country) AS country,
+             COUNT(*) FILTER (WHERE success) AS unlock_ok,
+             COUNT(*) FILTER (WHERE NOT success) AS unlock_fail,
+             MAX(created_at) AS last_attempt
+        FROM share_unlock_attempts
+       WHERE share_token IN (SELECT token FROM toks)
+         AND ip IS NOT NULL
+         AND created_at > now() - (${days}::int * interval '1 day')
+       GROUP BY ip
+    )
+    SELECT
+      COALESCE(v.ip, u.ip)                       AS ip,
+      COALESCE(v.country, u.country)             AS country,
+      COALESCE(v.view_count, 0)                  AS view_count,
+      COALESCE(v.viewers, 0)                     AS viewers,
+      v.first_seen::text                         AS first_seen,
+      v.last_seen::text                          AS last_seen,
+      COALESCE(u.unlock_ok, 0)                   AS unlock_ok,
+      COALESCE(u.unlock_fail, 0)                 AS unlock_fail
+    FROM views v
+    FULL OUTER JOIN unlocks u ON u.ip = v.ip
+    ORDER BY GREATEST(
+      COALESCE(v.last_seen, u.last_attempt),
+      COALESCE(u.last_attempt, v.last_seen)
+    ) DESC NULLS LAST
+    LIMIT 500
+  `;
+  return rows.map((r) => ({
+    ip: r.ip,
+    country: r.country,
+    city: null,
+    region: null,
+    view_count: num(r.view_count),
+    viewers: num(r.viewers),
+    first_seen: r.first_seen,
+    last_seen: r.last_seen,
+    unlock_ok: num(r.unlock_ok),
+    unlock_fail: num(r.unlock_fail),
+  }));
+}
+
 interface PhotoStatusRow { status: string; count: bigint | string | null }
 interface RelSizeRow { bytes: bigint | string | null }
 interface AdminDbRow {

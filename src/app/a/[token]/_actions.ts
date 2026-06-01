@@ -149,6 +149,28 @@ export async function toggleFavorite(
 }
 
 /**
+ * Record a password-gate attempt (success or failure) for the metrics
+ * drill-down. Fire-and-forget — a logging hiccup must never block the
+ * unlock response. country comes from Cloudflare's cf-ipcountry header.
+ */
+async function logUnlockAttempt(
+  token: string,
+  ip: string | null,
+  country: string | null,
+  viewerId: string | null,
+  success: boolean,
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO share_unlock_attempts (share_token, viewer_id, ip, country, success)
+      VALUES (${token}, ${viewerId}, ${ip}, ${country}, ${success})
+    `;
+  } catch (err) {
+    console.error("[unlock] attempt log failed", err);
+  }
+}
+
+/**
  * Verify the share link password, set the signed unlock cookie on
  * success. Used by the password gate page; returns plain JSON so the
  * page can render an inline error without a redirect dance.
@@ -180,9 +202,22 @@ export async function unlockShareLink(
     return { ok: false, error: "Incorrect password." };
   }
   const ok = await verifyPassword(link.password_hash, password);
+
+  // Log the attempt (success AND failure) so the metrics drill-down can show
+  // which IPs entered the password and which tried and failed.
+  const jar = await cookies();
+  const cc = (hdrs.get("cf-ipcountry") ?? "").trim().toUpperCase();
+  const country = cc && cc !== "XX" && cc !== "T1" ? cc : null;
+  void logUnlockAttempt(
+    token,
+    ip === "unknown" ? null : ip,
+    country,
+    jar.get(VIEWER_COOKIE)?.value ?? null,
+    ok,
+  );
+
   if (!ok) return { ok: false, error: "Incorrect password." };
 
-  const jar = await cookies();
   jar.set(unlockCookieName(token), signUnlockValue(token, Date.now()), {
     httpOnly: true,
     sameSite: "lax",

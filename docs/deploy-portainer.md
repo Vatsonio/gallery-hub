@@ -77,6 +77,17 @@ cloudflared.
 
 Full reference: `.env.prod.example`.
 
+### Optional env vars
+
+| Var | Notes |
+|---|---|
+| `TRUST_PROXY_HEADERS` | `1` when behind a trusted proxy (Cloudflare Tunnel). Required for the metrics "Top albums → Views" drill-down to record **real client IPs** (`cf-connecting-ip`) and per-IP login rate-limiting; otherwise IPs log as `unknown`/shared. Only enable when the app is genuinely behind a proxy that strips client-supplied `x-forwarded-for`. |
+| `GEOIP_DB_PATH` | Absolute path to a MaxMind **GeoLite2-City.mmdb** (mount it into the gallery-app container). Enables **city/region** in the visitor drill-down. Without it the drill-down shows country only (from Cloudflare's `cf-ipcountry`). Get a free DB at maxmind.com (GeoLite2, requires a free license key) and refresh it periodically. |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token. **Env-only** — the admin UI never stores it (it's a secret at rest). Required to actually send notifications. |
+| `TELEGRAM_CHAT_ID` | Default Telegram chat id for notifications (can be overridden in `/admin/settings`). |
+| `NEXT_PUBLIC_PH_SESSION_REPLAY` | `1` to re-enable PostHog session replay (off by default — it records visitor screens). |
+| `MAX_EXPORT_PHOTOS` / `MAX_EXPORT_BYTES` | Override the export size ceilings (defaults 5000 photos / 25 GB). |
+
 ## Updates
 
 Three options, pick what matches your workflow.

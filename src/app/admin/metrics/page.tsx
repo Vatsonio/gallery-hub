@@ -23,6 +23,7 @@ import { getDiskInfo, type DiskRow } from "@/lib/disk-info";
 import { formatBytes, formatCount, formatRelativeTime } from "@/lib/format";
 import { MetricsKpiTile } from "@/components/admin/MetricsKpiTile";
 import { MetricsSparkline } from "@/components/admin/MetricsSparkline";
+import { AlbumViewersCell } from "@/components/admin/AlbumViewersCell";
 
 export const dynamic = "force-dynamic";
 
@@ -182,7 +183,11 @@ export default async function MetricsPage(): Promise<React.JSX.Element> {
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
-                      {formatCount(a.views30d)}
+                      <AlbumViewersCell
+                        albumId={a.id}
+                        albumTitle={a.title}
+                        views={a.views30d}
+                      />
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {formatCount(a.favoritesLifetime)}

@@ -110,13 +110,20 @@ export async function GET(
   ]);
 
   if (viewerId !== ADMIN_PREVIEW_VIEWER_ID) {
+    // Capture client IP + country for the metrics drill-down. `ip` is the
+    // gated resolver value (null unless TRUST_PROXY_HEADERS=1); country comes
+    // from Cloudflare's cf-ipcountry header (XX/T1 are CF placeholders for
+    // unknown/Tor → store null). City is resolved later from the GeoIP DB.
+    const ipForRow = ip === "unknown" ? null : ip;
+    const cc = (h.get("cf-ipcountry") ?? "").trim().toUpperCase();
+    const countryForRow = cc && cc !== "XX" && cc !== "T1" ? cc : null;
     // View dedup: 30-min window per (token, viewer). F7: the prior code
     // SELECT-then-INSERT raced — two simultaneous first viewers both saw
     // prior=0 and both fired notifyFirstShareView. Insert first, then
     // ask "am I the only row?" so the DB serialises the decision.
     const inserted = await sql<{ id: number }[]>`
-      INSERT INTO view_events (share_token, viewer_id, event_type)
-      SELECT ${token}, ${viewerId}, 'page_view'
+      INSERT INTO view_events (share_token, viewer_id, event_type, ip, country)
+      SELECT ${token}, ${viewerId}, 'page_view', ${ipForRow}, ${countryForRow}
        WHERE NOT EXISTS (
          SELECT 1 FROM view_events
           WHERE share_token = ${token}
