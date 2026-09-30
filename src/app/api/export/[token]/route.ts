@@ -22,6 +22,7 @@ import {
 import { WEB_VARIANT_RATIO } from "@/lib/exportSizes";
 import { createFanOutZip, type ZipEntry } from "@/lib/zipStream";
 import { variantKey } from "@/lib/keys";
+import { resolveOriginalExt } from "@/lib/photoExt";
 import { imgproxyWeb, photoVersionSeed } from "@/lib/imgproxy";
 import { resolveShareLinkStatus, unlockCookieName } from "@/lib/share";
 import { ADMIN_PREVIEW_VIEWER_ID, VIEWER_COOKIE } from "@/lib/viewer";
@@ -67,17 +68,21 @@ const exportLimiter = createRateLimiter({ max: 6, windowMs: 60_000 });
 // can't be turned into a resource-exhaustion lever (multi-GB ZIP, minutes
 // of open MinIO upload, and — combined with F4 — heap pressure). Overridable
 // via env for operators with genuinely huge albums.
-const MAX_EXPORT_PHOTOS = Number(process.env.MAX_EXPORT_PHOTOS ?? "5000");
-const MAX_EXPORT_BYTES = Number(process.env.MAX_EXPORT_BYTES ?? String(25 * 1_000_000_000));
-
-function deriveExtFromFilename(filename: string): string {
-  const dot = filename.lastIndexOf(".");
-  if (dot < 0 || dot === filename.length - 1) return "jpg";
-  return filename.slice(dot + 1).toLowerCase();
+// Env overrides must be a real positive number. An empty value ("") coerces
+// to 0 (every export rejected), and a non-numeric value to NaN (limit silently
+// disabled) — both are treated as "unset" so we fall back to the safe default.
+function positiveEnvNumber(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+const MAX_EXPORT_PHOTOS = positiveEnvNumber(process.env.MAX_EXPORT_PHOTOS, 5000);
+const MAX_EXPORT_BYTES = positiveEnvNumber(process.env.MAX_EXPORT_BYTES, 25 * 1_000_000_000);
+
 function originalKeyForPhoto(albumId: string, photoId: string, filename: string): string {
-  return `albums/${albumId}/${photoId}/original.${deriveExtFromFilename(filename)}`;
+  // resolveOriginalExt normalizes to the whitelist and maps jpeg->jpg, matching
+  // the key the upload pipeline writes (keys.ts derives ext from content-type).
+  return `albums/${albumId}/${photoId}/original.${resolveOriginalExt(filename)}`;
 }
 
 async function logExport(
@@ -204,6 +209,7 @@ export async function GET(
         FROM favorites f
         JOIN photos p ON p.id = f.photo_id
        WHERE f.share_token = ${token} AND f.viewer_id = ${viewerId}
+         AND p.album_id = ${status.link.album_id} AND p.status = 'ready'
        ORDER BY p.sort_order ASC, p.created_at ASC
     `;
   } else {
