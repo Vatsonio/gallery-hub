@@ -580,13 +580,18 @@ export async function finalizePhotoMetadata(
     exif?: PhotoExif | null;
   },
 ): Promise<void> {
+  // width/height/thumbhash are authoritative server-side reads and always win.
+  // taken_at/exif are COALESCEd onto the existing row: a value seeded at
+  // insert time (e.g. an importer that carries EXIF from a sidecar when the
+  // JPEG itself was scrubbed) survives a worker pass that parsed nothing,
+  // while a real in-file EXIF still overrides a null seed.
   await sql`
     UPDATE photos
        SET width      = ${meta.width},
            height     = ${meta.height},
-           taken_at   = ${meta.takenAt},
+           taken_at   = COALESCE(${meta.takenAt}, taken_at),
            thumbhash  = ${meta.thumbhash},
-           exif       = ${meta.exif ? sql.json({ ...meta.exif }) : null},
+           exif       = COALESCE(${meta.exif ? sql.json({ ...meta.exif }) : null}, exif),
            status     = 'ready',
            updated_at = now()
      WHERE id = ${photoId}
