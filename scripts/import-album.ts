@@ -175,7 +175,9 @@ async function main(): Promise<void> {
 
   let manifest: Manifest;
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
+    // Strip a UTF-8 BOM if some editor added one — JSON.parse rejects it.
+    const text = readFileSync(manifestPath, "utf8").replace(/^﻿/, "");
+    manifest = JSON.parse(text) as Manifest;
   } catch (e) {
     return die(`manifest is not valid JSON: ${(e as Error).message}`);
   }
