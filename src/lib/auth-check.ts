@@ -119,7 +119,7 @@ export async function requireAdminSessionFromCookies(): Promise<AdminAuthResult>
 }
 
 export async function requireAdmin(): Promise<AdminAuthOk> {
-  if (process.env.GH_TEST_BYPASS_AUTH === "1") {
+  if (process.env.GH_TEST_BYPASS_AUTH === "1" && process.env.NODE_ENV !== "production") {
     return { ok: true, userId: TEST_ADMIN_USER_ID, email: TEST_ADMIN_EMAIL, role: "owner" };
   }
   const r = await requireAdminSessionFromCookies();

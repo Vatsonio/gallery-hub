@@ -42,7 +42,12 @@ const nextConfig = {
   // every HTML response by default, which fingerprints the framework +
   // (combined with asset paths) the major version. Suppress.
   poweredByHeader: false,
-  experimental: { serverActions: { bodySizeLimit: "50mb" } },
+  // Server actions only carry small text forms (settings, share defaults,
+  // favorites toggles, unlock). Photo bytes go through presigned PUTs straight
+  // to MinIO, never through an action, so keep the body cap at the 1mb default:
+  // a 50mb cap let anonymous actions (unlock, toggleFavorite) push ~1gb of
+  // concurrent payload against the container memory limit.
+  experimental: { serverActions: { bodySizeLimit: "1mb" } },
   serverExternalPackages: ["sharp", "pg-boss"],
   images: {
     remotePatterns: [

@@ -59,10 +59,11 @@ async function gate(): Promise<AdminViewer> {
   // Test harness bypass: integration tests run server actions directly
   // without an iron-session cookie. Honour the same env flag the
   // requireAdmin() helper uses for its DB-bound call sites.
-  if (process.env.GH_TEST_BYPASS_AUTH === "1") {
+  if (process.env.GH_TEST_BYPASS_AUTH === "1" && process.env.NODE_ENV !== "production") {
     // Tests / bench scripts that flip this env flag bypass the iron-session
     // check; the test-admin user row must exist (ensureTestAdminUser) so
-    // its UUID resolves through the new owner_user_id FK.
+    // its UUID resolves through the new owner_user_id FK. Never honoured in a
+    // production build so a stray env value can't become an auth bypass.
     const { TEST_ADMIN_USER_ID } = await import("@/lib/test-admin");
     return { userId: TEST_ADMIN_USER_ID, role: "owner" };
   }
