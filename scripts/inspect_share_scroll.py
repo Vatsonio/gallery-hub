@@ -4,10 +4,15 @@ materialise and any gaps in the layout become real (not Playwright
 stitching artefacts).
 """
 import sys
+import os
 from playwright.sync_api import sync_playwright
 
-URL = "https://gallery.divass.space/a/cpLUTHI4PNxM"
-OUT = "C:/Users/VATS/AppData/Local/Temp"
+# Target share URL comes from the environment. Do not commit a real
+# production share token here: this file lives in a public repo.
+URL = os.environ.get("SHARE_URL", "")
+OUT = os.environ.get("OUT", os.environ.get("TEMP", "."))
+if not URL:
+    sys.exit("Set SHARE_URL in the environment (e.g. http://localhost:3000/a/<token>).")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)

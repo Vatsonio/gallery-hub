@@ -6,10 +6,15 @@ infinite-scroll loaders), capture console messages, and dump:
   - DOM snapshot to /tmp/share-bottom.html
   - Console errors / warnings to stdout
 """
+import os
 import sys
 from playwright.sync_api import sync_playwright
 
-URL = "https://gallery.divass.space/a/cpLUTHI4PNxM"
+# Target share URL comes from the environment. Do not commit a real
+# production share token here: this file lives in a public repo.
+URL = os.environ.get("SHARE_URL", "")
+if not URL:
+    sys.exit("Set SHARE_URL in the environment (e.g. http://localhost:3000/a/<token>).")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)

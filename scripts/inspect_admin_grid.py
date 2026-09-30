@@ -7,11 +7,17 @@ import os
 import sys
 from playwright.sync_api import sync_playwright
 
-BASE = os.environ.get("BASE", "https://gallery.divass.space")
-SLUG = os.environ.get("SLUG", "uzhhorod-haca-2026")
-EMAIL = os.environ.get("ADMIN_EMAIL", "ggggaggggagggg@gmail.com")
-PASSWORD = os.environ.get("ADMIN_PASSWORD", "avionika404")
-OUT = "C:/Users/VATS/AppData/Local/Temp"
+# Credentials and target come from the environment only. Never hardcode a
+# real admin login or a production URL here: this file is committed to a
+# public repo, so a default value is an instant credential leak.
+BASE = os.environ.get("BASE", "http://localhost:3000")
+SLUG = os.environ.get("SLUG", "")
+EMAIL = os.environ.get("ADMIN_EMAIL", "")
+PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+OUT = os.environ.get("OUT", os.environ.get("TEMP", "."))
+
+if not (SLUG and EMAIL and PASSWORD):
+    sys.exit("Set ADMIN_EMAIL, ADMIN_PASSWORD and SLUG (and optionally BASE, OUT) in the environment.")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
