@@ -129,7 +129,15 @@ function normalizeExif(raw: Record<string, unknown> | undefined): {
   const takenIso = asString(raw.taken_at);
   let takenAt: Date | null = null;
   if (takenIso) {
-    const d = new Date(takenIso);
+    // AutoPhoto sends the camera's NAIVE local clock (no zone), e.g.
+    // "2026-08-23T07:05:13". Parsing that with new Date() would bind it to
+    // the IMPORT machine's timezone and shift the wall-clock (a +03 host
+    // turns 07:05 into 04:05Z). To keep the camera-clock digits verbatim and
+    // deterministic regardless of where the import runs, treat a zone-less
+    // string as UTC. A string that DOES carry a zone (future exports) is
+    // honoured as-is.
+    const hasZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(takenIso);
+    const d = new Date(hasZone ? takenIso : `${takenIso}Z`);
     if (!Number.isNaN(d.getTime())) takenAt = d;
   }
   const exif: PhotoExif = {
@@ -148,8 +156,11 @@ function normalizeExif(raw: Record<string, unknown> | undefined): {
 }
 
 async function main(): Promise<void> {
-  if (!process.env.DATABASE_URL) die("DATABASE_URL is required");
-  if (!process.env.MINIO_ENDPOINT) die("MINIO_ENDPOINT is required");
+  const dryRun = flag("dry-run");
+  if (!dryRun) {
+    if (!process.env.DATABASE_URL) die("DATABASE_URL is required");
+    if (!process.env.MINIO_ENDPOINT) die("MINIO_ENDPOINT is required");
+  }
 
   const dir = arg("dir");
   if (!dir) die("--dir <folder> is required");
@@ -189,31 +200,64 @@ async function main(): Promise<void> {
 
   const status: AlbumStatus = arg("status") === "published" ? "published" : "draft";
 
-  const owner = await getOwner();
-  if (!owner) die("no owner admin_users row found — seed the admin first");
+  // Stable order for both dry-run and real path.
+  const orderedEarly = photos
+    .map((p, idx) => ({ p, idx }))
+    .sort((a, b) => (a.p.order ?? a.idx + 1) - (b.p.order ?? b.idx + 1))
+    .map((x) => x.p);
 
-  // Optional cross-check against a `done` file that carries "count=<N>".
-  const donePath = join(dirAbs, "done");
-  if (existsSync(donePath)) {
-    const doneTxt = readFileSync(donePath, "utf8");
-    const m = doneTxt.match(/count\s*=\s*(\d+)/i);
+  // Cross-check against a `done` file carrying "count=<N>" (tolerates CRLF).
+  const donePathEarly = join(dirAbs, "done");
+  if (existsSync(donePathEarly)) {
+    const m = readFileSync(donePathEarly, "utf8").match(/count\s*=\s*(\d+)/i);
     if (m && Number(m[1]) !== photos.length) {
       die(`done says count=${m[1]} but manifest has ${photos.length} photos — export incomplete`);
     }
   }
 
-  // Stable order: explicit order first, then manifest order.
-  const ordered = photos
-    .map((p, idx) => ({ p, idx }))
-    .sort((a, b) => (a.p.order ?? a.idx + 1) - (b.p.order ?? b.idx + 1))
-    .map((x) => x.p);
-
-  // Pre-flight: every referenced file must exist before we create the album.
-  for (const p of ordered) {
+  // Every referenced file must exist before we touch anything.
+  for (const p of orderedEarly) {
     const fn = asString(p.filename);
     if (!fn) die("every photo needs a filename");
     if (!existsSync(join(dirAbs, fn))) die(`file listed in manifest is missing: ${fn}`);
   }
+
+  if (dryRun) {
+    console.log(`[import-album] DRY RUN — "${title}" (${status}), ${orderedEarly.length} photos, no DB/MinIO writes`);
+    let totalBytes = 0;
+    let withExif = 0;
+    for (const p of orderedEarly) {
+      const fn = p.filename as string;
+      const buf = readFileSync(join(dirAbs, fn));
+      totalBytes += buf.byteLength;
+      let dims = "??x??";
+      try {
+        const meta = await sharp(buf).metadata();
+        dims = `${meta.width}x${meta.height}`;
+      } catch (e) {
+        console.log(`  SKIP ${fn}: not decodable (${(e as Error).message})`);
+        continue;
+      }
+      const { exif, takenAt } = normalizeExif(p.exif);
+      if (exif) withExif += 1;
+      const ext = resolveOriginalExt(sanitizeFilename(fn));
+      console.log(
+        `  ${fn} -> original.${ext} ${dims} ${(buf.byteLength / 1e6).toFixed(1)}MB` +
+          (exif ? ` | ${exif.camera ?? "?"} iso${exif.iso ?? "?"} f${exif.aperture ?? "?"} ${exif.shutter ?? "?"} ${exif.focal_mm ?? "?"}mm taken=${takenAt ? takenAt.toISOString() : "null"}` : " | no exif"),
+      );
+    }
+    const coverName = asString(manifest.cover);
+    console.log(
+      `[import-album] DRY RUN ok: ${orderedEarly.length} photos, ${(totalBytes / 1e6).toFixed(1)}MB total, ${withExif} with exif, cover=${coverName ?? "(first)"}`,
+    );
+    return;
+  }
+
+  // done-count, file existence and ordering were already validated above.
+  const ordered = orderedEarly;
+
+  const owner = await getOwner();
+  if (!owner) die("no owner admin_users row found — seed the admin first");
 
   console.log(`[import-album] "${title}" (${status}) — ${ordered.length} photos, owner ${owner.email}`);
   const album = await createAlbum({ title, subtitle: null, status, ownerUserId: owner.id });
