@@ -70,6 +70,16 @@
 ### Моніторинг
 - TODO: немає зовнішньої перевірки доступності (простій 2026-09 помітив аудит, не алерт). Потрібен Uptime Kuma або healthchecks.io на /api/health, dead-man на бекапи, алерт на диск > 80%.
 
+## Підтверджено на живому сервері (2026-10-06)
+
+- Docker Engine 29.1.3: Watchtower падає з `client version 1.25 is too old`, автооновлення не працює. Деплой після мерджу треба робити вручну (Pull and redeploy у Portainer) або через webhook.
+- Сервісів бекапу на хості немає.
+- `daemon.json` без `log-opts`, логи без ротації.
+- Немає `mem_limit` і read-only rootfs у жодного контейнера.
+- Стек у проді відрізняється від git (є змінні з незакоміченого diff).
+- `ADMIN_PASSWORD` присутній у контейнері app.
+- У проді все ще стара збірка (Next 15.5.18) до деплою фіксів.
+
 ## Процес
 
 - Сканер у CI: TODO, CI зараз лише typecheck. Додати job з тестами (vitest + testcontainers) і trivy для образів, Dependabot/Renovate.
