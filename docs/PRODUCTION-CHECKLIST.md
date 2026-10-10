@@ -83,6 +83,12 @@
 - Postgres: `shared_buffers 128MB`, `max_connections 100` (типові), роль застосунку суперкористувач.
 - ОС хоста (Ubuntu 24.04.4): 92 доступні оновлення, з них 5 безпекових. TODO: `apt upgrade` у вікно обслуговування і `unattended-upgrades` для безпекових.
 
+## Стан на 2026-10-10
+
+- Watchtower: тисячі рестартів (Docker 29 API). TODO: прибрати зі стеку.
+- Telegram-сповіщення не доставляються: у мережі хоста перехоплюється DNS на порту 53, для api.telegram.org повертається 127.0.0.2. Сам Telegram за IP доступний. TODO: DNS-over-TLS на хості або extra_hosts для worker.
+- Сховище даних на окремому диску з запасом місця; обсяг фото швидко росте, а копії досі немає.
+
 ## Процес
 
 - Сканер у CI: TODO, CI зараз лише typecheck. Додати job з тестами (vitest + testcontainers) і trivy для образів, Dependabot/Renovate.
