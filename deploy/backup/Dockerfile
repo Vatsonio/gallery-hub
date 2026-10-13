@@ -12,6 +12,12 @@ FROM postgres:16.5-alpine
 # old documented hash). Bumping to v0.2.33 and trusting the tagged URL.
 ENV SUPERCRONIC_VERSION=v0.2.33
 
+# mc is pinned to a GitHub release and verified by sha256. dl.min.io stopped
+# serving community binaries (HTTP 410 Gone since late 2025), which broke this
+# build; RELEASE.2025-08-13T08-35-41Z is the last published mc release.
+ENV MC_RELEASE=RELEASE.2025-08-13T08-35-41Z
+ENV MC_SHA256=01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891
+
 RUN apk add --no-cache \
         bash \
         ca-certificates \
@@ -20,7 +26,9 @@ RUN apk add --no-cache \
         gzip \
         tzdata \
         wget \
- && wget -q -O /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc \
+ && wget -q -O /usr/local/bin/mc \
+        "https://github.com/minio/mc/releases/download/${MC_RELEASE}/mc.linux-amd64.${MC_RELEASE}" \
+ && echo "${MC_SHA256}  /usr/local/bin/mc" | sha256sum -c - \
  && chmod +x /usr/local/bin/mc \
  && wget -q -O /usr/local/bin/supercronic \
         "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-amd64" \
